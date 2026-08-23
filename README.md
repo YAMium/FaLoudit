@@ -30,7 +30,7 @@ It does **not** edit plugins, generate patches, sort load order, or alter the ga
 ## Fastest start: Codex project
 
 1. Open the [latest release](https://github.com/YAMium/FaLoudit/releases/latest).
-2. Download `faloudit-codex-project-<version>.zip` — for example, `faloudit-codex-project-0.4.0.zip`.
+2. Download `faloudit-codex-project-<version>.zip` — for example, `faloudit-codex-project-0.4.1.zip`.
 3. Extract it to a new folder **outside** the game and MO2 directories.
 4. Open that folder as a project in Codex.
 5. Send this first message:
@@ -59,10 +59,12 @@ Codex then runs the required FaLoudit searches itself and should return the reco
 flowchart LR
     A[Visible problem text] --> B[FaLoudit analyze]
     B --> C{Indexed localization match?}
-    C -->|Yes| D[Record override chain]
+    C -->|Plugin record| D[Record override chain]
+    C -->|Engine GameSetting| J[EXE default → GMST → Stewie INI]
     C -->|No| E[Saved script content]
     E -->|Still missing| F[Read-only manual fallback]
     D --> G[Winning plugin record]
+    J --> H
     G --> H[Physical MO2 file and source mod]
     E --> H
     F --> H
@@ -96,6 +98,8 @@ If an assistant cannot execute local programs, run FaLoudit yourself and paste i
 - physical MO2 file conflicts and plugin record conflicts;
 - ambiguous Cyrillic/Windows code-page decoding evidence;
 - matching text in saved top-level or nested script source;
+- hardcoded `s*` GameSettings with their exact EditorID, engine default,
+  plugin GMST assignments, and post-plugin Stewie Tweaks INI winner;
 - bulk regression and untranslated-review candidates;
 - before/after diagnostic snapshots and reports.
 
@@ -107,7 +111,13 @@ Supported language profiles: `en`, `de`, `fr`, `es`, `it`, `pt`, `pl`, `cs`, `sk
 
 The configured game, MO2 instance, active profile, mods, `Data`, `overwrite`, plugins, and archives are treated as **read-only sources**. FaLoudit writes its configuration, index, cache, logs, and reports only under the selected `.falloutloc` workspace. Keep that workspace outside every source directory.
 
-The index stores localized fields and saved script source; it does not decompile every compiled script bytecode path. A static script match proves that text exists, not that the code executed at runtime. Hardcoded executable strings and unsupported or compiled-only content may require the read-only manual fallback. FaLoudit reports these limitations instead of guessing.
+The index stores localized fields, saved script source, and validated string
+GameSettings. Engine defaults are extracted read-only from the user's installed
+`GECK.exe`; the game and editor are never launched. If GECK is absent, normal
+plugin indexing continues with a warning. A static script match proves that
+text exists, not that the code executed at runtime. Arbitrary executable strings
+outside the GameSetting catalog and unsupported or compiled-only content may
+still require the read-only manual fallback.
 
 ## Documentation
 

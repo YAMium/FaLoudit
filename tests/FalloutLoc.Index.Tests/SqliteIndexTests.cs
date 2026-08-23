@@ -60,6 +60,104 @@ public sealed class SqliteIndexTests
     }
 
     [Fact]
+    public void EngineGameSettingsJoinPluginAndPostPluginOverridesByEditorId()
+    {
+        using var area = new TestArea();
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["base.esm"] =
+            [
+                Record(
+                    "000999:Base.esm",
+                    "sHowMany",
+                    "Сколько из плагина?",
+                    recordType: "GameSettingString",
+                    category: "game-setting") with
+                {
+                    Strings =
+                    [
+                        new RecordStringOccurrence
+                        {
+                            SemanticPath = "Data",
+                            Category = "game-setting",
+                            Text = "Сколько из плагина?",
+                            Language = TextLanguageKind.Target,
+                            EncodingEvidence = StringEncodingEvidence.UnicodeTarget,
+                            Ambiguous = false,
+                        },
+                    ],
+                },
+            ],
+        };
+        var request = Request(area, "base.esm") with
+        {
+            EngineGameSettingCatalogStatus = "extracted",
+            EngineGameSettingCatalogPath = Path.Combine(area.Source, "GECK.exe"),
+            RuntimeExecutablePath = Path.Combine(area.Source, "FalloutNV.exe"),
+            EngineGameSettings =
+            [
+                new IndexEngineGameSettingInput
+                {
+                    EditorId = "sHowMany",
+                    DefaultText = "How many?",
+                    Language = TextLanguageKind.Source,
+                    EncodingEvidence = StringEncodingEvidence.Ascii,
+                    Ambiguous = false,
+                },
+            ],
+            PostPluginGameSettings =
+            [
+                new IndexPostPluginGameSettingInput
+                {
+                    EditorId = "sHowMany",
+                    Text = "Сколько из INI?",
+                    Language = TextLanguageKind.Target,
+                    EncodingEvidence = StringEncodingEvidence.UnicodeTarget,
+                    Ambiguous = false,
+                    LogicalPath = "NVSE/Plugins/nvse_stewie_tweaks.ini",
+                    PhysicalPath = Path.Combine(area.Source, "nvse_stewie_tweaks.ini"),
+                    SourceMod = "Stewie INI",
+                    EffectivePriority = 10,
+                    Sequence = 0,
+                },
+            ],
+        };
+
+        var result = CreateBuilder(area, new FakeBackend(records)).Build(request);
+        var repository = new SqliteIndexRepository(area.Database);
+
+        Assert.Equal(1, result.EngineGameSettings);
+        Assert.Equal(1, result.PostPluginGameSettingOverrides);
+        var engineMatch = Assert.Single(repository.SearchText(new IndexedTextSearchRequest
+        {
+            Query = "How many?",
+            Mode = IndexedTextSearchMode.Exact,
+        }).Items);
+        Assert.Equal("gmst:sHowMany", engineMatch.FormKey);
+        Assert.Equal("engineDefault", engineMatch.SourceKind);
+        Assert.False(engineMatch.IsWinningOverride);
+
+        var trace = repository.Trace("gmst:sHowMany");
+        Assert.Equal(3, trace.Chain.Count);
+        Assert.Equal("FalloutNV.exe", trace.Chain[0].PluginName);
+        Assert.Equal("base.esm", trace.Chain[1].PluginName);
+        Assert.Equal("NVSE/Plugins/nvse_stewie_tweaks.ini", trace.Chain[2].PluginName);
+        Assert.True(trace.Chain[2].IsWinner);
+        Assert.Equal("Сколько из INI?", Assert.Single(trace.Chain[2].Strings).Text);
+
+        var editorMatch = Assert.Single(repository.FindByEditorId(new IndexedEditorIdSearchRequest
+        {
+            EditorId = "SHOWMANY",
+        }).Items);
+        Assert.Equal("gmst:sHowMany", editorMatch.FormKey);
+        Assert.Equal(3, editorMatch.OverrideCount);
+        var status = repository.GetStatus();
+        Assert.Equal("extracted", status.EngineGameSettingCatalogStatus);
+        Assert.Equal(1, status.EngineGameSettings);
+        Assert.Equal(1, status.PostPluginGameSettingOverrides);
+    }
+
+    [Fact]
     public void RegressionCandidatesIncludeExactSourceReversionAcrossSharedLatinScript()
     {
         using var area = new TestArea();
@@ -220,7 +318,7 @@ public sealed class SqliteIndexTests
         };
 
         var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
-        Assert.Equal(5, result.SchemaVersion);
+        Assert.Equal(6, result.SchemaVersion);
         Assert.Equal(1, result.Contents);
         Assert.Empty(new SqliteIndexRepository(area.Database).Find("Welcome"));
 
@@ -401,7 +499,7 @@ public sealed class SqliteIndexTests
         var status = repository.GetStatus();
         var coverage = repository.GetCoverage();
 
-        Assert.Equal(5, result.SchemaVersion);
+        Assert.Equal(6, result.SchemaVersion);
         Assert.Equal(1, result.PartiallyParsedPlugins);
         Assert.Equal(2, result.CoverageGapRecords);
         Assert.Equal(1, status.PartiallyParsedPlugins);
@@ -555,7 +653,7 @@ public sealed class SqliteIndexTests
         Assert.Equal(0, result.ReusedPlugins);
         Assert.Equal(1, result.ParsedPlugins);
         Assert.Equal(1, migrationBackend.OpenCount);
-        Assert.Equal(5, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
+        Assert.Equal(6, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
     }
 
     [Fact]

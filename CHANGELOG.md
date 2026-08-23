@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1 — 2026-08-23
+
+- Added local read-only extraction of hardcoded string GameSettings from the
+  installed FO3/FNV GECK executable without bundling Bethesda strings.
+- Added searchable synthetic `gmst:<EditorID>` identities and value traces that
+  join engine defaults with active ESM/ESP GMST assignments by EditorID.
+- Added MO2-aware indexing of Stewie Tweaks `[GameSettings]` assignments from
+  the winning main INI and `NVSE/Plugins/Tweaks/Gamesettings` files as an
+  after-plugins layer.
+- Preserved CP1251 and unmarked UTF-8 INI bytes for strict configured-language
+  recovery instead of assuming UTF-8.
+- Advanced the SQLite index to schema 6 and included engine/INI inputs in index
+  freshness fingerprints.
+
 ## 0.4.0 — 2026-08-23
 
 - Added mandatory explicit `sourceLanguage` and `targetLanguage` project settings.

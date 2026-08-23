@@ -47,13 +47,37 @@ Field diagnostics use `earlierTarget`; rendered/snapshot evidence uses
 ## Versioned stores
 
 - Project configuration schema: `2`.
-- SQLite index schema: `5`.
+- SQLite index schema: `6`.
 - Diagnostic snapshot schema: `2`.
 
 A schema-1 project configuration is readable only to produce an actionable
 migration error; it must be configured again with explicit languages. SQLite
 indexes are atomically rebuilt rather than edited in place. Snapshot comparison
 requires equal snapshot schemas and, for schema 2, equal language pairs.
+
+## Engine GameSettings
+
+FaLoudit 0.4.1 adds string GameSettings that are initialized by the game
+runtime rather than stored as ordinary plugin records. They use a stable
+synthetic identity:
+
+```text
+gmst:<EditorID>
+```
+
+For example, `gmst:sHowMany` is not a FormKey and must not be interpreted as a
+hexadecimal FormID. `find` and `analyze` can return these identities, `edid`
+resolves an exact setting name, and `trace gmst:<EditorID>` returns the ordered
+value chain:
+
+1. engine default extracted locally from GECK;
+2. active ESM/ESP `GameSettingString` assignments matched by EditorID;
+3. winning Stewie Tweaks `[GameSettings]` INI assignments applied after ESPs.
+
+String search results add `sourceKind` with `engineDefault`, `plugin`, or
+`postPluginIni`. Index snapshot metadata adds `engineGameSettings`,
+`postPluginGameSettingOverrides`, `engineGameSettingCatalogStatus`, optional
+catalog/runtime paths, and warnings. These are additive schema-2 fields.
 
 ## Compatibility rule
 

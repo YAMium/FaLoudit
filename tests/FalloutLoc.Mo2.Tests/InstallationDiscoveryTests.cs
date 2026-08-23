@@ -75,6 +75,34 @@ public sealed class InstallationDiscoveryTests
     }
 
     [Fact]
+    public void ResolvesWinningFilesRecursivelyUnderALogicalDirectory()
+    {
+        using var fixture = new Mo2Fixture();
+        var relative = Path.Combine("NVSE", "Plugins", "Tweaks", "Gamesettings", "nested", "strings.ini");
+        foreach (var (mod, content) in new[] { ("Base Mod", "base"), ("Russian Mod", "winner") })
+        {
+            var path = Path.Combine(fixture.ModsRoot, mod, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content);
+        }
+
+        var fileSystem = CreateSourceFileSystem(fixture);
+        var profile = new Mo2ProfileReader(fileSystem).Read(fixture.ModsRoot, fixture.ProfileRoot);
+
+        var map = new Mo2FileResolver(fileSystem).ResolveDirectoryFiles(
+            Path.Combine("NVSE", "Plugins", "Tweaks", "Gamesettings"),
+            ".ini",
+            fixture.DataRoot,
+            fixture.OverwriteRoot,
+            profile);
+
+        var resolution = Assert.Single(map).Value;
+        Assert.Equal(2, resolution.Providers.Count);
+        Assert.Equal("Russian Mod", resolution.Winner?.SourceName);
+        Assert.EndsWith(relative, resolution.Winner?.PhysicalPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void RejectsLogicalParentTraversal()
     {
         using var fixture = new Mo2Fixture();

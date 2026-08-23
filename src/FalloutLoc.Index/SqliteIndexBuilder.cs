@@ -14,7 +14,7 @@ public sealed class SqliteIndexBuilder(
     IPluginBackend backend,
     IPluginEncodingClassifier encodingClassifier)
 {
-    public const string IndexerCacheVersion = "7";
+    public const string IndexerCacheVersion = "8";
 
     public string CacheIdentity => $"{backend.Name}|schema={SqliteSchema.Version}|indexer={IndexerCacheVersion}";
 
@@ -69,6 +69,7 @@ public sealed class SqliteIndexBuilder(
                     ConfigureConnection(connection);
                     snapshotId = ResetClonedSnapshot(connection, request);
                     ReplaceProviders(connection, snapshotId, request.PhysicalProviders);
+                    ReplaceGameSettings(connection, snapshotId, request);
                     work = PrepareClonedPlugins(connection, snapshotId, request.Plugins);
                 }
                 else
@@ -76,6 +77,7 @@ public sealed class SqliteIndexBuilder(
                     SqliteSchema.Create(connection);
                     snapshotId = InsertSnapshot(connection, request);
                     InsertProviders(connection, snapshotId, request.PhysicalProviders);
+                    InsertGameSettings(connection, snapshotId, request);
                     work = request.Plugins.OrderBy(plugin => plugin.LoadOrderIndex)
                         .Select(plugin => new PluginWorkItem(plugin, InsertPlugin(connection, snapshotId, plugin)))
                         .ToArray();
@@ -184,6 +186,10 @@ public sealed class SqliteIndexBuilder(
                 Records = totalRecords,
                 Strings = totalStrings,
                 Contents = totalContents,
+                EngineGameSettings = request.EngineGameSettings.Count,
+                PostPluginGameSettingOverrides = request.PostPluginGameSettings.Count,
+                EngineGameSettingCatalogStatus = request.EngineGameSettingCatalogStatus,
+                EngineGameSettingWarnings = request.EngineGameSettingWarnings,
                 Duration = stopwatch.Elapsed,
             };
         }
@@ -201,9 +207,12 @@ public sealed class SqliteIndexBuilder(
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO snapshots(created_utc, mode, mo2_root, profile_name, source_language, target_language,
-                                  load_order_fingerprint, backend_name, status)
+                                  load_order_fingerprint, backend_name,
+                                  engine_game_setting_catalog_status, engine_game_setting_catalog_path,
+                                  runtime_executable_path, engine_game_setting_warnings, status)
             VALUES ($created, $mode, $root, $profile, $sourceLanguage, $targetLanguage,
-                    $fingerprint, $backend, 'building');
+                    $fingerprint, $backend, $catalogStatus, $catalogPath,
+                    $runtimePath, $catalogWarnings, 'building');
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$created", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
@@ -214,7 +223,118 @@ public sealed class SqliteIndexBuilder(
         command.Parameters.AddWithValue("$targetLanguage", request.TargetLanguage);
         command.Parameters.AddWithValue("$fingerprint", request.LoadOrderFingerprint);
         command.Parameters.AddWithValue("$backend", CacheIdentity);
+        command.Parameters.AddWithValue("$catalogStatus", request.EngineGameSettingCatalogStatus);
+        command.Parameters.AddWithValue("$catalogPath", request.EngineGameSettingCatalogPath is null
+            ? DBNull.Value : request.EngineGameSettingCatalogPath);
+        command.Parameters.AddWithValue("$runtimePath", request.RuntimeExecutablePath is null
+            ? DBNull.Value : request.RuntimeExecutablePath);
+        command.Parameters.AddWithValue("$catalogWarnings", request.EngineGameSettingWarnings.Count == 0
+            ? DBNull.Value : JsonSerializer.Serialize(request.EngineGameSettingWarnings));
         return (long)command.ExecuteScalar()!;
+    }
+
+    private static void ReplaceGameSettings(
+        SqliteConnection connection,
+        long snapshotId,
+        IndexBuildRequest request)
+    {
+        using (var deletePostPlugin = connection.CreateCommand())
+        {
+            deletePostPlugin.CommandText = "DELETE FROM post_plugin_game_settings WHERE snapshot_id = $snapshot;";
+            deletePostPlugin.Parameters.AddWithValue("$snapshot", snapshotId);
+            deletePostPlugin.ExecuteNonQuery();
+        }
+
+        using (var deleteEngine = connection.CreateCommand())
+        {
+            deleteEngine.CommandText = "DELETE FROM engine_game_settings WHERE snapshot_id = $snapshot;";
+            deleteEngine.Parameters.AddWithValue("$snapshot", snapshotId);
+            deleteEngine.ExecuteNonQuery();
+        }
+
+        InsertGameSettings(connection, snapshotId, request);
+    }
+
+    private static void InsertGameSettings(
+        SqliteConnection connection,
+        long snapshotId,
+        IndexBuildRequest request)
+    {
+        using var transaction = connection.BeginTransaction();
+        using (var engine = connection.CreateCommand())
+        {
+            engine.Transaction = transaction;
+            engine.CommandText = """
+                INSERT INTO engine_game_settings(
+                    snapshot_id, editor_id, default_text, normalized_text, language,
+                    encoding_evidence, ambiguous)
+                VALUES ($snapshot, $editor, $text, $normalized, $language, $encoding, $ambiguous);
+                """;
+            engine.Parameters.Add("$snapshot", SqliteType.Integer);
+            engine.Parameters.Add("$editor", SqliteType.Text);
+            engine.Parameters.Add("$text", SqliteType.Text);
+            engine.Parameters.Add("$normalized", SqliteType.Text);
+            engine.Parameters.Add("$language", SqliteType.Text);
+            engine.Parameters.Add("$encoding", SqliteType.Text);
+            engine.Parameters.Add("$ambiguous", SqliteType.Integer);
+            engine.Prepare();
+            foreach (var setting in request.EngineGameSettings)
+            {
+                engine.Parameters["$snapshot"].Value = snapshotId;
+                engine.Parameters["$editor"].Value = setting.EditorId;
+                engine.Parameters["$text"].Value = setting.DefaultText;
+                engine.Parameters["$normalized"].Value =
+                    (object?)TextNormalizer.Normalize(setting.DefaultText) ?? DBNull.Value;
+                engine.Parameters["$language"].Value = setting.Language.ToString();
+                engine.Parameters["$encoding"].Value = setting.EncodingEvidence.ToString();
+                engine.Parameters["$ambiguous"].Value = setting.Ambiguous ? 1 : 0;
+                engine.ExecuteNonQuery();
+            }
+        }
+
+        using (var postPlugin = connection.CreateCommand())
+        {
+            postPlugin.Transaction = transaction;
+            postPlugin.CommandText = """
+                INSERT INTO post_plugin_game_settings(
+                    snapshot_id, editor_id, text, normalized_text, language, encoding_evidence,
+                    ambiguous, logical_path, physical_path, source_mod, effective_priority, sequence)
+                VALUES ($snapshot, $editor, $text, $normalized, $language, $encoding,
+                        $ambiguous, $logical, $physical, $source, $priority, $sequence);
+                """;
+            postPlugin.Parameters.Add("$snapshot", SqliteType.Integer);
+            postPlugin.Parameters.Add("$editor", SqliteType.Text);
+            postPlugin.Parameters.Add("$text", SqliteType.Text);
+            postPlugin.Parameters.Add("$normalized", SqliteType.Text);
+            postPlugin.Parameters.Add("$language", SqliteType.Text);
+            postPlugin.Parameters.Add("$encoding", SqliteType.Text);
+            postPlugin.Parameters.Add("$ambiguous", SqliteType.Integer);
+            postPlugin.Parameters.Add("$logical", SqliteType.Text);
+            postPlugin.Parameters.Add("$physical", SqliteType.Text);
+            postPlugin.Parameters.Add("$source", SqliteType.Text);
+            postPlugin.Parameters.Add("$priority", SqliteType.Integer);
+            postPlugin.Parameters.Add("$sequence", SqliteType.Integer);
+            postPlugin.Prepare();
+            foreach (var setting in request.PostPluginGameSettings.OrderBy(item => item.Sequence))
+            {
+                postPlugin.Parameters["$snapshot"].Value = snapshotId;
+                postPlugin.Parameters["$editor"].Value = setting.EditorId;
+                postPlugin.Parameters["$text"].Value = setting.Text;
+                postPlugin.Parameters["$normalized"].Value =
+                    (object?)TextNormalizer.Normalize(setting.Text) ?? DBNull.Value;
+                postPlugin.Parameters["$language"].Value = setting.Language.ToString();
+                postPlugin.Parameters["$encoding"].Value = setting.EncodingEvidence.ToString();
+                postPlugin.Parameters["$ambiguous"].Value = setting.Ambiguous ? 1 : 0;
+                postPlugin.Parameters["$logical"].Value = setting.LogicalPath;
+                postPlugin.Parameters["$physical"].Value = setting.PhysicalPath;
+                postPlugin.Parameters["$source"].Value = setting.SourceMod;
+                postPlugin.Parameters["$priority"].Value = setting.EffectivePriority;
+                postPlugin.Parameters["$sequence"].Value = setting.Sequence;
+                postPlugin.ExecuteNonQuery();
+            }
+        }
+
+        transaction.Commit();
     }
 
     private static void InsertProviders(
@@ -356,7 +476,12 @@ public sealed class SqliteIndexBuilder(
             UPDATE snapshots
             SET created_utc = $created, mode = $mode, mo2_root = $root, profile_name = $profile,
                 source_language = $sourceLanguage, target_language = $targetLanguage,
-                load_order_fingerprint = $fingerprint, backend_name = $backend, status = 'building'
+                load_order_fingerprint = $fingerprint, backend_name = $backend,
+                engine_game_setting_catalog_status = $catalogStatus,
+                engine_game_setting_catalog_path = $catalogPath,
+                runtime_executable_path = $runtimePath,
+                engine_game_setting_warnings = $catalogWarnings,
+                status = 'building'
             WHERE id = $id;
             """;
         update.Parameters.AddWithValue("$created", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
@@ -367,6 +492,13 @@ public sealed class SqliteIndexBuilder(
         update.Parameters.AddWithValue("$targetLanguage", request.TargetLanguage);
         update.Parameters.AddWithValue("$fingerprint", request.LoadOrderFingerprint);
         update.Parameters.AddWithValue("$backend", CacheIdentity);
+        update.Parameters.AddWithValue("$catalogStatus", request.EngineGameSettingCatalogStatus);
+        update.Parameters.AddWithValue("$catalogPath", request.EngineGameSettingCatalogPath is null
+            ? DBNull.Value : request.EngineGameSettingCatalogPath);
+        update.Parameters.AddWithValue("$runtimePath", request.RuntimeExecutablePath is null
+            ? DBNull.Value : request.RuntimeExecutablePath);
+        update.Parameters.AddWithValue("$catalogWarnings", request.EngineGameSettingWarnings.Count == 0
+            ? DBNull.Value : JsonSerializer.Serialize(request.EngineGameSettingWarnings));
         update.Parameters.AddWithValue("$id", snapshotId);
         update.ExecuteNonQuery();
         return snapshotId;

@@ -30,6 +30,29 @@ public sealed record IndexPhysicalProviderInput
     public string? Sha256 { get; init; }
 }
 
+public sealed record IndexEngineGameSettingInput
+{
+    public required string EditorId { get; init; }
+    public required string DefaultText { get; init; }
+    public required TextLanguageKind Language { get; init; }
+    public required StringEncodingEvidence EncodingEvidence { get; init; }
+    public required bool Ambiguous { get; init; }
+}
+
+public sealed record IndexPostPluginGameSettingInput
+{
+    public required string EditorId { get; init; }
+    public required string Text { get; init; }
+    public required TextLanguageKind Language { get; init; }
+    public required StringEncodingEvidence EncodingEvidence { get; init; }
+    public required bool Ambiguous { get; init; }
+    public required string LogicalPath { get; init; }
+    public required string PhysicalPath { get; init; }
+    public required string SourceMod { get; init; }
+    public required long EffectivePriority { get; init; }
+    public required int Sequence { get; init; }
+}
+
 public sealed record IndexBuildRequest
 {
     public required string DestinationPath { get; init; }
@@ -41,6 +64,12 @@ public sealed record IndexBuildRequest
     public required string TargetLanguage { get; init; }
     public required IReadOnlyList<IndexPluginInput> Plugins { get; init; }
     public required IReadOnlyList<IndexPhysicalProviderInput> PhysicalProviders { get; init; }
+    public IReadOnlyList<IndexEngineGameSettingInput> EngineGameSettings { get; init; } = [];
+    public IReadOnlyList<IndexPostPluginGameSettingInput> PostPluginGameSettings { get; init; } = [];
+    public string EngineGameSettingCatalogStatus { get; init; } = "unavailable";
+    public string? EngineGameSettingCatalogPath { get; init; }
+    public string? RuntimeExecutablePath { get; init; }
+    public IReadOnlyList<string> EngineGameSettingWarnings { get; init; } = [];
     public string? PreviousDatabasePath { get; init; }
     public bool ReuseUnchangedPlugins { get; init; } = true;
 }
@@ -69,6 +98,10 @@ public sealed record IndexBuildResult
     public required long Records { get; init; }
     public required long Strings { get; init; }
     public long Contents { get; init; }
+    public int EngineGameSettings { get; init; }
+    public int PostPluginGameSettingOverrides { get; init; }
+    public required string EngineGameSettingCatalogStatus { get; init; }
+    public IReadOnlyList<string> EngineGameSettingWarnings { get; init; } = [];
     public required TimeSpan Duration { get; init; }
 }
 
@@ -88,6 +121,7 @@ public sealed record IndexedStringMatch
     public required StringEncodingEvidence EncodingEvidence { get; init; }
     public required bool Ambiguous { get; init; }
     public required bool IsWinningOverride { get; init; }
+    public string SourceKind { get; init; } = "plugin";
 }
 
 public enum IndexedTextSearchMode
@@ -268,6 +302,12 @@ public sealed record IndexSnapshotStatus
     public required int FailedPlugins { get; init; }
     public int PartiallyParsedPlugins { get; init; }
     public long CoverageGapRecords { get; init; }
+    public int EngineGameSettings { get; init; }
+    public int PostPluginGameSettingOverrides { get; init; }
+    public string EngineGameSettingCatalogStatus { get; init; } = "unavailable";
+    public string? EngineGameSettingCatalogPath { get; init; }
+    public string? RuntimeExecutablePath { get; init; }
+    public IReadOnlyList<string> EngineGameSettingWarnings { get; init; } = [];
 }
 
 public sealed record IndexCoverageRecordType
@@ -331,6 +371,9 @@ public sealed record IndexCoverageReport
     public required long TotalStringFields { get; init; }
     public required long NonEmptyStringFields { get; init; }
     public required long AmbiguousStringFields { get; init; }
+    public int EngineGameSettings { get; init; }
+    public int PostPluginGameSettingOverrides { get; init; }
+    public string EngineGameSettingCatalogStatus { get; init; } = "unavailable";
     public required bool IssuesTruncated { get; init; }
     public required IReadOnlyList<IndexCoverageRecordType> RecordTypes { get; init; }
     public required IReadOnlyList<IndexCoverageCategory> Categories { get; init; }

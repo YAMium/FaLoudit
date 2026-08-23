@@ -1023,3 +1023,29 @@ plain Latin text without override history is only a review candidate.
 Configuration schema 1 requires explicit migration. SQLite schema 4 is rebuilt
 atomically as schema 5 and is never mutated inside a source directory. See
 `docs/MULTILINGUAL_DESIGN_0.4.md` for the compatibility design.
+
+---
+
+# 40. Engine string GameSettings (version 0.4.1)
+
+String GameSettings initialized by `Fallout3.exe` or `FalloutNV.exe` are a
+separate diagnostic identity class. They do not have an engine-default FormID
+and must be represented as `gmst:<EditorID>`, never as an invented plugin
+FormKey.
+
+The default EditorID/value catalog is extracted read-only from the user's local
+FO3/FNV `GECK.exe`. FaLoudit must not bundle Bethesda strings, load the editor,
+or inspect runtime process memory. An unavailable or unrecognized GECK produces
+an actionable incomplete-catalog warning while normal plugin indexing remains
+usable.
+
+The effective value trace is resolved by EditorID in this order:
+
+1. validated engine default;
+2. active plugin `GameSettingString.Data` assignments in load order;
+3. MO2-winning Stewie Tweaks `[GameSettings]` INI assignments applied after
+   plugins, including the dedicated `NVSE/Plugins/Tweaks/Gamesettings` tree.
+
+INI bytes use the same reversible configured-code-page recovery policy as
+plugin strings. Engine catalog and post-plugin INI inputs participate in the
+index freshness fingerprint. SQLite schema 5 is rebuilt atomically as schema 6.

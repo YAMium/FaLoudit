@@ -10,6 +10,8 @@ public interface ISourceFileSystem
 
     IReadOnlyList<string> ReadAllLines(string path);
 
+    byte[] ReadAllBytes(string path);
+
     IEnumerable<string> EnumerateDirectories(string path);
 
     IEnumerable<string> EnumerateFiles(string path);

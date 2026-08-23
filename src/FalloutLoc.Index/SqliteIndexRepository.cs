@@ -58,7 +58,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 isDeterministic: true);
         }
 
-        const string winnerExpression = """
+        const string normalWinnerExpression = """
             NOT EXISTS (
                 SELECT 1
                 FROM records later_record
@@ -72,11 +72,11 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var escaped = EscapeLike(normalized);
         var matchPredicate = request.Mode switch
         {
-            IndexedTextSearchMode.Exact when request.IgnoreCase => "s.normalized_text = $normalized",
-            IndexedTextSearchMode.Exact => "s.text = $query COLLATE BINARY",
-            IndexedTextSearchMode.Contains when request.IgnoreCase => "s.normalized_text LIKE $pattern ESCAPE '\\'",
-            IndexedTextSearchMode.Contains => "instr(s.text, $query) > 0",
-            IndexedTextSearchMode.Regex => "faloudit_regex(s.text) = 1",
+            IndexedTextSearchMode.Exact when request.IgnoreCase => "u.normalized_text = $normalized",
+            IndexedTextSearchMode.Exact => "u.text = $query COLLATE BINARY",
+            IndexedTextSearchMode.Contains when request.IgnoreCase => "u.normalized_text LIKE $pattern ESCAPE '\\'",
+            IndexedTextSearchMode.Contains => "instr(u.text, $query) > 0",
+            IndexedTextSearchMode.Regex => "faloudit_regex(u.text) = 1",
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Mode, "Unsupported text search mode."),
         };
         var rankExpression = request.Mode switch
@@ -85,15 +85,15 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             IndexedTextSearchMode.Regex => "(3 + 0)",
             _ when request.IgnoreCase => """
                 CASE
-                    WHEN s.normalized_text = $normalized THEN 0
-                    WHEN s.normalized_text LIKE $prefix ESCAPE '\' THEN 1
+                    WHEN u.normalized_text = $normalized THEN 0
+                    WHEN u.normalized_text LIKE $prefix ESCAPE '\' THEN 1
                     ELSE 2
                 END
                 """,
             _ => """
                 CASE
-                    WHEN s.text = $query COLLATE BINARY THEN 0
-                    WHEN instr(s.text, $query) = 1 THEN 1
+                    WHEN u.text = $query COLLATE BINARY THEN 0
+                    WHEN instr(u.text, $query) = 1 THEN 1
                     ELSE 2
                 END
                 """,
@@ -101,41 +101,120 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var predicates = new List<string> { matchPredicate };
         if (!string.IsNullOrWhiteSpace(request.PluginName))
         {
-            predicates.Add("p.name = $plugin COLLATE NOCASE");
+            predicates.Add("u.plugin_name = $plugin COLLATE NOCASE");
         }
 
         if (!string.IsNullOrWhiteSpace(request.RecordType))
         {
-            predicates.Add("r.record_type = $type COLLATE NOCASE");
+            predicates.Add("u.record_type = $type COLLATE NOCASE");
         }
 
         if (!string.IsNullOrWhiteSpace(request.Category))
         {
-            predicates.Add("s.category = $category COLLATE NOCASE");
+            predicates.Add("u.category = $category COLLATE NOCASE");
         }
 
         if (request.WinnerOnly)
         {
-            predicates.Add(winnerExpression);
+            predicates.Add("u.is_winner = 1");
         }
 
         using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT r.form_key, r.record_type, r.editor_id,
-                   p.name, p.load_order_index, p.physical_path, p.source_mod,
-                   s.semantic_path, s.category, s.text, s.language, s.encoding_evidence, s.ambiguous,
-                   CASE WHEN {winnerExpression} THEN 1 ELSE 0 END AS is_winner
-            FROM strings s
-            JOIN records r ON r.id = s.record_id
-            JOIN plugins p ON p.id = r.plugin_id
+            WITH game_setting_sources AS (
+                SELECT 'gmst:' || e.editor_id AS form_key,
+                       'GameSettingString' AS record_type,
+                       e.editor_id,
+                       CASE WHEN snapshot.mode = 'Fallout3' THEN 'Fallout3.exe' ELSE 'FalloutNV.exe' END AS plugin_name,
+                       -1 AS load_order_index,
+                       COALESCE(snapshot.runtime_executable_path, snapshot.engine_game_setting_catalog_path, '') AS physical_path,
+                       'Game Runtime' AS source_mod,
+                       'Data' AS semantic_path,
+                       'game-setting' AS category,
+                       e.default_text AS text,
+                       e.normalized_text,
+                       e.language,
+                       e.encoding_evidence,
+                       e.ambiguous,
+                       'engineDefault' AS source_kind,
+                       0 AS precedence_group,
+                       0 AS precedence_order,
+                       e.id AS stable_id
+                FROM engine_game_settings e
+                JOIN snapshots snapshot ON snapshot.id = e.snapshot_id
+
+                UNION ALL
+
+                SELECT 'gmst:' || r.editor_id,
+                       'GameSettingString', r.editor_id,
+                       p.name, p.load_order_index, p.physical_path, p.source_mod,
+                       s.semantic_path, s.category, s.text, s.normalized_text,
+                       s.language, s.encoding_evidence, s.ambiguous,
+                       'plugin', 1, p.load_order_index, r.id
+                FROM strings s
+                JOIN records r ON r.id = s.record_id
+                JOIN plugins p ON p.id = r.plugin_id
+                WHERE r.record_type = 'GameSettingString' COLLATE NOCASE
+                  AND r.editor_id IS NOT NULL
+                  AND s.semantic_path = 'Data' COLLATE NOCASE
+
+                UNION ALL
+
+                SELECT 'gmst:' || post.editor_id,
+                       'GameSettingString', post.editor_id,
+                       post.logical_path, 2147483647, post.physical_path, post.source_mod,
+                       'Data', 'game-setting', post.text, post.normalized_text,
+                       post.language, post.encoding_evidence, post.ambiguous,
+                       'postPluginIni', 2, post.sequence, post.id
+                FROM post_plugin_game_settings post
+            ),
+            ranked_game_settings AS (
+                SELECT source.*,
+                       CASE WHEN ROW_NUMBER() OVER (
+                           PARTITION BY source.editor_id COLLATE NOCASE
+                           ORDER BY source.precedence_group DESC,
+                                    source.precedence_order DESC,
+                                    source.stable_id DESC
+                       ) = 1 THEN 1 ELSE 0 END AS is_winner
+                FROM game_setting_sources source
+            ),
+            unified_strings AS (
+                SELECT r.form_key, r.record_type, r.editor_id,
+                       p.name AS plugin_name, p.load_order_index, p.physical_path, p.source_mod,
+                       s.semantic_path, s.category, s.text, s.normalized_text,
+                       s.language, s.encoding_evidence, s.ambiguous,
+                       CASE WHEN {normalWinnerExpression} THEN 1 ELSE 0 END AS is_winner,
+                       'plugin' AS source_kind,
+                       p.load_order_index AS source_order,
+                       s.id AS stable_id
+                FROM strings s
+                JOIN records r ON r.id = s.record_id
+                JOIN plugins p ON p.id = r.plugin_id
+                WHERE r.record_type <> 'GameSettingString' COLLATE NOCASE
+                   OR r.editor_id IS NULL
+
+                UNION ALL
+
+                SELECT form_key, record_type, editor_id, plugin_name, load_order_index,
+                       physical_path, source_mod, semantic_path, category, text, normalized_text,
+                       language, encoding_evidence, ambiguous, is_winner, source_kind,
+                       (precedence_group * 1000000) + precedence_order AS source_order,
+                       stable_id
+                FROM ranked_game_settings
+            )
+            SELECT u.form_key, u.record_type, u.editor_id,
+                   u.plugin_name, u.load_order_index, u.physical_path, u.source_mod,
+                   u.semantic_path, u.category, u.text, u.language, u.encoding_evidence, u.ambiguous,
+                   u.is_winner, u.source_kind
+            FROM unified_strings u
             WHERE {string.Join(" AND ", predicates)}
             ORDER BY
                 {rankExpression},
-                is_winner DESC,
-                p.load_order_index DESC,
-                r.form_key COLLATE NOCASE,
-                s.semantic_path COLLATE NOCASE,
-                s.id
+                u.is_winner DESC,
+                u.source_order DESC,
+                u.form_key COLLATE NOCASE,
+                u.semantic_path COLLATE NOCASE,
+                u.stable_id
             LIMIT $take OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$query", request.Query);
@@ -167,6 +246,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 EncodingEvidence = Enum.Parse<StringEncodingEvidence>(reader.GetString(11)),
                 Ambiguous = reader.GetBoolean(12),
                 IsWinningOverride = reader.GetBoolean(13),
+                SourceKind = reader.GetString(14),
             });
         }
 
@@ -331,6 +411,44 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.EditorId);
         ValidatePageLimit(request.Limit);
+        if (string.IsNullOrWhiteSpace(request.PluginName)
+            && (string.IsNullOrWhiteSpace(request.RecordType)
+                || request.RecordType.Equals("GameSettingString", StringComparison.OrdinalIgnoreCase)))
+        {
+            var gameSetting = TraceGameSetting(request.EditorId);
+            if (gameSetting.Chain.Count > 0)
+            {
+                if (!string.IsNullOrWhiteSpace(request.Cursor))
+                {
+                    throw new ArgumentException("A GameSetting EditorID result has no additional page.", nameof(request));
+                }
+
+                var winner = gameSetting.Chain[^1];
+                return new IndexedPage<IndexedRecordMatch>
+                {
+                    Items =
+                    [
+                        new IndexedRecordMatch
+                        {
+                            FormKey = gameSetting.FormKey,
+                            OriginPlugin = gameSetting.Chain[0].PluginName,
+                            RecordType = "GameSettingString",
+                            EditorId = winner.EditorId,
+                            WinningPluginName = winner.PluginName,
+                            WinningLoadOrderIndex = winner.LoadOrderIndex,
+                            WinningPhysicalPath = winner.PhysicalPath,
+                            WinningSourceMod = winner.SourceMod,
+                            WinningEffectivePriority = winner.EffectivePriority,
+                            IsDeleted = winner.IsDeleted,
+                            OverrideCount = gameSetting.Chain.Count,
+                        },
+                    ],
+                    Limit = request.Limit,
+                    HasMore = false,
+                };
+            }
+        }
+
         var scope = string.Join('\0', "edid-v1", request.EditorId.ToUpperInvariant(),
             request.PluginName, request.RecordType, request.WinnerOnly);
         var offset = DecodeCursor(request.Cursor, scope);
@@ -446,6 +564,17 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
     public IndexedOverrideTrace Trace(string formKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(formKey);
+        if (formKey.StartsWith("gmst:", StringComparison.OrdinalIgnoreCase))
+        {
+            var editorId = formKey[5..].Trim();
+            if (editorId.Length == 0)
+            {
+                throw new ArgumentException("A synthetic GameSetting key must include an EditorID after 'gmst:'.", nameof(formKey));
+            }
+
+            return TraceGameSetting(editorId);
+        }
+
         using var connection = OpenValidated();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -489,6 +618,166 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         }
 
         return new IndexedOverrideTrace { FormKey = formKey, Chain = chain };
+    }
+
+    private IndexedOverrideTrace TraceGameSetting(string editorId)
+    {
+        using var connection = OpenValidated();
+        using (var canonical = connection.CreateCommand())
+        {
+            canonical.CommandText = """
+                SELECT editor_id FROM engine_game_settings WHERE editor_id = $editor COLLATE NOCASE
+                UNION ALL
+                SELECT editor_id FROM records
+                 WHERE record_type = 'GameSettingString' COLLATE NOCASE
+                   AND editor_id = $editor COLLATE NOCASE
+                UNION ALL
+                SELECT editor_id FROM post_plugin_game_settings WHERE editor_id = $editor COLLATE NOCASE
+                LIMIT 1;
+                """;
+            canonical.Parameters.AddWithValue("$editor", editorId);
+            editorId = canonical.ExecuteScalar() as string ?? editorId;
+        }
+
+        var chain = new List<IndexedOverride>();
+
+        using (var engine = connection.CreateCommand())
+        {
+            engine.CommandText = """
+                SELECT CASE WHEN snapshot.mode = 'Fallout3' THEN 'Fallout3.exe' ELSE 'FalloutNV.exe' END,
+                       COALESCE(snapshot.runtime_executable_path, snapshot.engine_game_setting_catalog_path, ''),
+                       e.default_text, e.language, e.encoding_evidence, e.ambiguous
+                FROM engine_game_settings e
+                JOIN snapshots snapshot ON snapshot.id = e.snapshot_id
+                WHERE e.editor_id = $editor COLLATE NOCASE
+                ORDER BY e.id DESC LIMIT 1;
+                """;
+            engine.Parameters.AddWithValue("$editor", editorId);
+            using var reader = engine.ExecuteReader();
+            if (reader.Read())
+            {
+                chain.Add(new IndexedOverride
+                {
+                    PluginName = reader.GetString(0),
+                    LoadOrderIndex = -1,
+                    PhysicalPath = reader.GetString(1),
+                    SourceMod = "Game Runtime",
+                    EffectivePriority = -1,
+                    RecordType = "GameSettingString",
+                    EditorId = editorId,
+                    IsDeleted = false,
+                    IsCompressed = false,
+                    IsWinner = false,
+                    Strings =
+                    [
+                        new IndexedTraceString
+                        {
+                            SemanticPath = "Data",
+                            Category = "game-setting",
+                            Text = reader.GetString(2),
+                            Language = Enum.Parse<TextLanguageKind>(reader.GetString(3)),
+                            EncodingEvidence = Enum.Parse<StringEncodingEvidence>(reader.GetString(4)),
+                            Ambiguous = reader.GetBoolean(5),
+                        },
+                    ],
+                });
+            }
+        }
+
+        var pluginRows = new List<RawOverride>();
+        using (var plugins = connection.CreateCommand())
+        {
+            plugins.CommandText = """
+                SELECT r.id, p.name, p.load_order_index, p.physical_path, p.source_mod, p.effective_priority,
+                       r.record_type, r.editor_id, r.is_deleted, r.is_compressed
+                FROM records r
+                JOIN plugins p ON p.id = r.plugin_id
+                WHERE r.record_type = 'GameSettingString' COLLATE NOCASE
+                  AND r.editor_id = $editor COLLATE NOCASE
+                ORDER BY p.load_order_index, r.id;
+                """;
+            plugins.Parameters.AddWithValue("$editor", editorId);
+            using var reader = plugins.ExecuteReader();
+            while (reader.Read())
+            {
+                pluginRows.Add(new RawOverride(
+                    reader.GetInt64(0), reader.GetString(1), reader.GetInt32(2), reader.GetString(3),
+                    reader.GetString(4), reader.GetInt64(5), reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetBoolean(8), reader.GetBoolean(9)));
+            }
+        }
+
+        foreach (var item in pluginRows)
+        {
+            chain.Add(new IndexedOverride
+            {
+                PluginName = item.PluginName,
+                LoadOrderIndex = item.LoadOrderIndex,
+                PhysicalPath = item.PhysicalPath,
+                SourceMod = item.SourceMod,
+                EffectivePriority = item.EffectivePriority,
+                RecordType = "GameSettingString",
+                EditorId = editorId,
+                IsDeleted = item.IsDeleted,
+                IsCompressed = item.IsCompressed,
+                IsWinner = false,
+                Strings = ReadStrings(connection, item.RecordId)
+                    .Where(field => field.SemanticPath.Equals("Data", StringComparison.OrdinalIgnoreCase))
+                    .ToArray(),
+            });
+        }
+
+        using (var postPlugin = connection.CreateCommand())
+        {
+            postPlugin.CommandText = """
+                SELECT logical_path, physical_path, source_mod, effective_priority,
+                       text, language, encoding_evidence, ambiguous
+                FROM post_plugin_game_settings
+                WHERE editor_id = $editor COLLATE NOCASE
+                ORDER BY sequence, id;
+                """;
+            postPlugin.Parameters.AddWithValue("$editor", editorId);
+            using var reader = postPlugin.ExecuteReader();
+            while (reader.Read())
+            {
+                chain.Add(new IndexedOverride
+                {
+                    PluginName = reader.GetString(0),
+                    LoadOrderIndex = int.MaxValue,
+                    PhysicalPath = reader.GetString(1),
+                    SourceMod = reader.GetString(2),
+                    EffectivePriority = reader.GetInt64(3),
+                    RecordType = "GameSettingString",
+                    EditorId = editorId,
+                    IsDeleted = false,
+                    IsCompressed = false,
+                    IsWinner = false,
+                    Strings =
+                    [
+                        new IndexedTraceString
+                        {
+                            SemanticPath = "Data",
+                            Category = "game-setting",
+                            Text = reader.GetString(4),
+                            Language = Enum.Parse<TextLanguageKind>(reader.GetString(5)),
+                            EncodingEvidence = Enum.Parse<StringEncodingEvidence>(reader.GetString(6)),
+                            Ambiguous = reader.GetBoolean(7),
+                        },
+                    ],
+                });
+            }
+        }
+
+        if (chain.Count > 0)
+        {
+            chain[^1] = chain[^1] with { IsWinner = true };
+        }
+
+        return new IndexedOverrideTrace
+        {
+            FormKey = $"gmst:{editorId}",
+            Chain = chain,
+        };
     }
 
     public IReadOnlyList<string> FindRegressionCandidateFormKeys(string? winningPlugin, int limit)
@@ -671,7 +960,13 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                    SUM(CASE WHEN p.parse_status IN ('parsed', 'partiallyParsed') THEN 1 ELSE 0 END),
                    SUM(CASE WHEN p.parse_status = 'failed' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN p.parse_status = 'partiallyParsed' THEN 1 ELSE 0 END),
-                   COALESCE(SUM(p.coverage_gap_record_count), 0)
+                   COALESCE(SUM(p.coverage_gap_record_count), 0),
+                   (SELECT COUNT(*) FROM engine_game_settings e WHERE e.snapshot_id = s.id),
+                   (SELECT COUNT(*) FROM post_plugin_game_settings post WHERE post.snapshot_id = s.id),
+                   s.engine_game_setting_catalog_status,
+                   s.engine_game_setting_catalog_path,
+                   s.runtime_executable_path,
+                   s.engine_game_setting_warnings
             FROM snapshots s
             LEFT JOIN plugins p ON p.snapshot_id = s.id
             WHERE s.status = 'complete'
@@ -698,6 +993,14 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             FailedPlugins = reader.GetInt32(8),
             PartiallyParsedPlugins = reader.GetInt32(9),
             CoverageGapRecords = reader.GetInt64(10),
+            EngineGameSettings = reader.GetInt32(11),
+            PostPluginGameSettingOverrides = reader.GetInt32(12),
+            EngineGameSettingCatalogStatus = reader.GetString(13),
+            EngineGameSettingCatalogPath = reader.IsDBNull(14) ? null : reader.GetString(14),
+            RuntimeExecutablePath = reader.IsDBNull(15) ? null : reader.GetString(15),
+            EngineGameSettingWarnings = reader.IsDBNull(16)
+                ? []
+                : JsonSerializer.Deserialize<string[]>(reader.GetString(16)) ?? [],
         };
         return _statusCache;
     }
@@ -747,6 +1050,9 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             TotalStringFields = categories.Sum(item => item.Fields),
             NonEmptyStringFields = categories.Sum(item => item.NonEmptyFields),
             AmbiguousStringFields = categories.Sum(item => item.AmbiguousFields),
+            EngineGameSettings = status.EngineGameSettings,
+            PostPluginGameSettingOverrides = status.PostPluginGameSettingOverrides,
+            EngineGameSettingCatalogStatus = status.EngineGameSettingCatalogStatus,
             IssuesTruncated = issues.Count > issueLimit,
             RecordTypes = recordTypes,
             Categories = categories,

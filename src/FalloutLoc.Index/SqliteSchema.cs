@@ -4,7 +4,7 @@ namespace FalloutLoc.Index;
 
 internal static class SqliteSchema
 {
-    public const int Version = 5;
+    public const int Version = 6;
 
     public static void Create(SqliteConnection connection)
     {
@@ -18,7 +18,7 @@ internal static class SqliteSchema
             CREATE TABLE schema_info (
                 version INTEGER NOT NULL
             );
-            INSERT INTO schema_info(version) VALUES (5);
+            INSERT INTO schema_info(version) VALUES (6);
 
             CREATE TABLE snapshots (
                 id INTEGER PRIMARY KEY,
@@ -30,6 +30,10 @@ internal static class SqliteSchema
                 target_language TEXT NOT NULL,
                 load_order_fingerprint TEXT NOT NULL,
                 backend_name TEXT NOT NULL,
+                engine_game_setting_catalog_status TEXT NOT NULL,
+                engine_game_setting_catalog_path TEXT,
+                runtime_executable_path TEXT,
+                engine_game_setting_warnings TEXT,
                 status TEXT NOT NULL
             );
 
@@ -107,6 +111,33 @@ internal static class SqliteSchema
                 ambiguous INTEGER NOT NULL,
                 is_heuristic INTEGER NOT NULL
             );
+
+            CREATE TABLE engine_game_settings (
+                id INTEGER PRIMARY KEY,
+                snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+                editor_id TEXT NOT NULL,
+                default_text TEXT NOT NULL,
+                normalized_text TEXT,
+                language TEXT NOT NULL,
+                encoding_evidence TEXT NOT NULL,
+                ambiguous INTEGER NOT NULL
+            );
+
+            CREATE TABLE post_plugin_game_settings (
+                id INTEGER PRIMARY KEY,
+                snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+                editor_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                normalized_text TEXT,
+                language TEXT NOT NULL,
+                encoding_evidence TEXT NOT NULL,
+                ambiguous INTEGER NOT NULL,
+                logical_path TEXT NOT NULL,
+                physical_path TEXT NOT NULL,
+                source_mod TEXT NOT NULL,
+                effective_priority INTEGER NOT NULL,
+                sequence INTEGER NOT NULL
+            );
             """;
         command.ExecuteNonQuery();
     }
@@ -125,6 +156,12 @@ internal static class SqliteSchema
             CREATE INDEX ix_strings_diagnostics ON strings(language, category COLLATE NOCASE, record_id, semantic_path);
             CREATE INDEX ix_record_contents_record_id ON record_contents(record_id);
             CREATE INDEX ix_record_contents_normalized_text ON record_contents(normalized_text);
+            CREATE UNIQUE INDEX ux_engine_game_settings_editor
+                ON engine_game_settings(snapshot_id, editor_id COLLATE NOCASE);
+            CREATE INDEX ix_engine_game_settings_text ON engine_game_settings(normalized_text);
+            CREATE INDEX ix_post_plugin_game_settings_editor
+                ON post_plugin_game_settings(snapshot_id, editor_id COLLATE NOCASE, sequence);
+            CREATE INDEX ix_post_plugin_game_settings_text ON post_plugin_game_settings(normalized_text);
             CREATE INDEX ix_physical_logical ON physical_providers(snapshot_id, logical_path COLLATE NOCASE);
             ANALYZE;
             """;

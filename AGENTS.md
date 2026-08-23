@@ -101,7 +101,9 @@ When the user reports an untranslated string:
 1. Use the project's `faloudit` CLI.
 2. Search the text.
 3. Resolve candidate records.
-4. Identify record type, FormID and EditorID.
+4. Identify record type, FormID and EditorID. If the result uses
+   `gmst:<EditorID>`, it is an engine GameSetting identity rather than a FormID;
+   trace it directly with `faloudit trace gmst:<EditorID>`.
 5. Inspect the complete active override chain.
 6. Determine the winning override.
 7. Show relevant translated string-field changes.
@@ -112,6 +114,11 @@ When the user reports an untranslated string:
 12. Distinguish MO2 file-level conflicts from plugin record-level conflicts.
 13. Check for string-encoding problems.
 14. Explain ambiguity rather than guessing.
+
+For string GameSettings, inspect the value chain separately: engine default
+extracted locally from GECK, active ESM/ESP `GameSettingString` assignments
+matched by EditorID, then MO2-winning Stewie Tweaks `[GameSettings]` INIs that
+apply after plugins.
 
 Prefer `--json` when interpreting results programmatically.
 

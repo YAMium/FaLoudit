@@ -7,6 +7,7 @@ using FalloutLoc.Analysis;
 using FalloutLoc.Analysis.Models;
 using FalloutLoc.Backends.Abstractions;
 using FalloutLoc.Backends.Encoding;
+using FalloutLoc.Backends.Engine;
 using FalloutLoc.Backends.Models;
 using FalloutLoc.Backends.Mutagen;
 using FalloutLoc.Core.Configuration;
@@ -228,6 +229,7 @@ public static class Program
                 : $"Missing: {string.Join(", ", missing)}");
 
         var backendName = "Mutagen.Bethesda.Fallout3 0.54.4";
+        IReadOnlyList<string> gameSettingWarnings = [];
         StrictPluginStringDecoder? decoder = null;
         if (configuredPair is not null)
         {
@@ -279,6 +281,17 @@ public static class Program
             {
                 AddCheck(checks, "mutagen-cp1251-smoke", false, exception.Message);
             }
+
+            var gameSettings = LoadGameSettingInputs(configuration, result, guard, sourceFileSystem);
+            gameSettingWarnings = gameSettings.Warnings;
+            AddCheck(
+                checks,
+                "engine-game-settings",
+                gameSettings.CatalogStatus != "failed",
+                gameSettings.CatalogStatus == "extracted"
+                    ? $"Extracted {gameSettings.EngineSettings.Count} string settings; " +
+                      $"found {gameSettings.PostPluginSettings.Count} post-plugin INI assignment(s)."
+                    : "Engine GameSetting catalog is unavailable; plugin indexing remains usable.");
         }
 
         var writeGuardPassed = false;
@@ -304,7 +317,7 @@ public static class Program
             ResolvedPhysicalPlugins = resolutions.Count(resolution => resolution.Winner is not null),
             Backend = backendName,
             Checks = checks,
-            Warnings = result.Warnings,
+            Warnings = result.Warnings.Concat(gameSettingWarnings).ToArray(),
         };
 
         if (json)
@@ -312,7 +325,7 @@ public static class Program
             WriteJson("doctor", healthy ? 0 : 1, new { success = healthy, doctor = report }, new JsonContractMetadata
             {
                 Context = JsonContext(result.Mode, result.SelectedProfile),
-                Warnings = result.Warnings,
+                Warnings = result.Warnings.Concat(gameSettingWarnings).ToArray(),
             });
         }
         else
@@ -353,6 +366,12 @@ public static class Program
             TargetLanguage = languagePair.Target,
             Plugins = current.Plugins,
             PhysicalProviders = current.Providers,
+            EngineGameSettings = current.EngineGameSettings,
+            PostPluginGameSettings = current.PostPluginGameSettings,
+            EngineGameSettingCatalogStatus = current.EngineGameSettingCatalogStatus,
+            EngineGameSettingCatalogPath = current.EngineGameSettingCatalogPath,
+            RuntimeExecutablePath = current.RuntimeExecutablePath,
+            EngineGameSettingWarnings = current.EngineGameSettingWarnings,
             PreviousDatabasePath = GetIndexPath(workspace),
             ReuseUnchangedPlugins = !forceReparse,
         };
@@ -378,7 +397,8 @@ public static class Program
                     IndexState = JsonIndexState(freshness),
                     Warnings = IndexWarnings(
                         freshness.Snapshot?.FailedPlugins ?? 0,
-                        freshness.Snapshot?.PartiallyParsedPlugins ?? 0),
+                        freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
+                        freshness.Snapshot?.EngineGameSettingWarnings),
                 });
             }
             else
@@ -417,7 +437,10 @@ public static class Program
                     request.DestinationPath,
                     request.LoadOrderFingerprint,
                     builder.CacheIdentity)),
-                Warnings = IndexWarnings(result.FailedPlugins, result.PartiallyParsedPlugins),
+                Warnings = IndexWarnings(
+                    result.FailedPlugins,
+                    result.PartiallyParsedPlugins,
+                    result.EngineGameSettingWarnings),
             });
         }
         else
@@ -426,6 +449,12 @@ public static class Program
             Console.WriteLine($"Plugins: {result.IndexedPlugins} indexed " +
                 $"({result.ReusedPlugins} reused, {result.ParsedPlugins} parsed), {result.FailedPlugins} failed");
             Console.WriteLine($"Records: {result.Records}; strings: {result.Strings}; content sources: {result.Contents}; duration: {result.Duration}");
+            Console.WriteLine($"Engine GameSettings: {result.EngineGameSettings} ({result.EngineGameSettingCatalogStatus}); " +
+                $"post-plugin overrides: {result.PostPluginGameSettingOverrides}");
+            foreach (var warning in result.EngineGameSettingWarnings)
+            {
+                Console.WriteLine($"Warning: {warning}");
+            }
         }
 
         return result.FailedPlugins == 0 ? 0 : 2;
@@ -546,7 +575,7 @@ public static class Program
         else if (page.Items.Count == 0)
         {
             Console.WriteLine("No matching indexed record content.");
-            Console.WriteLine("Manual read-only search may still be required for compiled scripts, loose files, archives, or hardcoded executable strings.");
+            Console.WriteLine("Manual read-only search may still be required for compiled scripts, loose files, archives, or executable strings outside the GameSetting catalog.");
         }
         else
         {
@@ -689,7 +718,8 @@ public static class Program
                     IndexState = JsonIndexState(freshness),
                     Warnings = IndexWarnings(
                         freshness.Snapshot?.FailedPlugins ?? 0,
-                        freshness.Snapshot?.PartiallyParsedPlugins ?? 0),
+                        freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
+                        freshness.Snapshot?.EngineGameSettingWarnings),
                 });
             }
             else
@@ -748,7 +778,7 @@ public static class Program
                     },
                 manualFallbackRecommended,
                 manualFallbackReason = manualFallbackRecommended
-                    ? "The current content index covers saved SCPT source only; compiled scripts, loose files, archives, and executable strings may still require a manual read-only search."
+                    ? "The current content index covers saved SCPT source and validated string GameSettings; compiled scripts, loose files, archives, and other executable strings may still require a manual read-only search."
                     : null,
             };
         }
@@ -783,7 +813,8 @@ public static class Program
                 Confidence = result.Confidence,
                 Warnings = IndexWarnings(
                     freshness.Snapshot?.FailedPlugins ?? 0,
-                    freshness.Snapshot?.PartiallyParsedPlugins ?? 0),
+                    freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
+                    freshness.Snapshot?.EngineGameSettingWarnings),
             });
         }
         else
@@ -810,7 +841,7 @@ public static class Program
             }
             else if (manualFallbackRecommended)
             {
-                Console.WriteLine("No indexed content match. Continue with a manual read-only search of compiled scripts, loose files, archives, and executable strings.");
+                Console.WriteLine("No indexed content match. Continue with a manual read-only search of compiled scripts, loose files, archives, and executable strings outside the GameSetting catalog.");
             }
         }
         return 0;
@@ -818,7 +849,10 @@ public static class Program
 
     private static int RunTrace(string[] args, bool json)
     {
-        var formKey = RequirePositional(args, 1, "trace requires a FormKey such as 029438:FalloutNV.esm.");
+        var formKey = RequirePositional(
+            args,
+            1,
+            "trace requires a FormKey such as 029438:FalloutNV.esm or a GameSetting key such as gmst:sHowMany.");
         var repository = new SqliteIndexRepository(GetIndexPath(GetWorkspace(args)));
         var trace = repository.Trace(formKey);
         if (json)
@@ -1406,13 +1440,224 @@ public static class Program
             });
         }
 
+        var gameSettings = LoadGameSettingInputs(
+            configuration,
+            discovery,
+            guard,
+            sourceFileSystem);
+
         return new CurrentIndexInputs(
             configuration,
             discovery,
             guard,
             plugins,
             providers,
-            ComputeFingerprint(configuration, discovery, plugins, providers, guard));
+            gameSettings.EngineSettings,
+            gameSettings.PostPluginSettings,
+            gameSettings.CatalogStatus,
+            gameSettings.CatalogPath,
+            gameSettings.RuntimeExecutablePath,
+            gameSettings.Warnings,
+            ComputeFingerprint(
+                configuration,
+                discovery,
+                plugins,
+                providers,
+                gameSettings,
+                guard));
+    }
+
+    private static GameSettingInputs LoadGameSettingInputs(
+        ProjectConfiguration configuration,
+        InstallationDiscoveryResult discovery,
+        ReadOnlySourceGuard guard,
+        SourceFileSystem sourceFileSystem)
+    {
+        var pair = configuration.RequireLanguagePair();
+        var decoder = new StrictPluginStringDecoder(pair.Source, pair.Target);
+        var warnings = new List<string>();
+        var runtimeName = configuration.Mode == GameMode.Fallout3 ? "Fallout3.exe" : "FalloutNV.exe";
+        var runtimeCandidate = Path.Combine(configuration.GameRoot, runtimeName);
+        string? runtimePath = null;
+        if (sourceFileSystem.FileExists(runtimeCandidate))
+        {
+            runtimePath = guard.EnsureReadableSource(runtimeCandidate);
+        }
+        else
+        {
+            warnings.Add($"Runtime executable was not found at the configured game root: {runtimeCandidate}");
+        }
+
+        string? catalogPath = null;
+        var catalogStatus = "unavailable";
+        IReadOnlyList<IndexEngineGameSettingInput> engineSettings = [];
+        var geckCandidates = new[]
+        {
+            Path.Combine(configuration.GameRoot, "GECK.exe"),
+            Path.Combine(configuration.Mo2Root, "GECK.exe"),
+        }.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var geckPath = geckCandidates.FirstOrDefault(sourceFileSystem.FileExists);
+        if (geckPath is null)
+        {
+            warnings.Add(
+                "GECK.exe was not found under the configured game or MO2 root; " +
+                "hardcoded string GameSettings cannot be mapped to their default text.");
+        }
+        else
+        {
+            catalogPath = guard.EnsureReadableSource(geckPath);
+            try
+            {
+                var catalog = new GeckGameSettingCatalogExtractor().Extract(catalogPath);
+                engineSettings = catalog.Entries.Select(entry =>
+                {
+                    var decoded = decoder.Decode(entry.DefaultValue);
+                    return new IndexEngineGameSettingInput
+                    {
+                        EditorId = entry.EditorId,
+                        DefaultText = decoded.Text ?? string.Empty,
+                        Language = decoded.Language,
+                        EncodingEvidence = decoded.EncodingEvidence,
+                        Ambiguous = decoded.IsAmbiguous,
+                    };
+                }).ToArray();
+                catalogStatus = "extracted";
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+            {
+                catalogStatus = "failed";
+                warnings.Add($"GECK string GameSetting extraction failed: {exception.Message}");
+            }
+        }
+
+        var postPlugin = LoadPostPluginGameSettings(discovery, sourceFileSystem, decoder, warnings);
+        return new GameSettingInputs(
+            engineSettings,
+            postPlugin,
+            catalogStatus,
+            catalogPath,
+            runtimePath,
+            warnings);
+    }
+
+    private static IReadOnlyList<IndexPostPluginGameSettingInput> LoadPostPluginGameSettings(
+        InstallationDiscoveryResult discovery,
+        SourceFileSystem sourceFileSystem,
+        StrictPluginStringDecoder decoder,
+        List<string> warnings)
+    {
+        var resolver = new Mo2FileResolver(sourceFileSystem);
+        var files = new List<(PhysicalFileResolution Resolution, bool ExtraDirectory)>();
+        var main = resolver.Resolve(
+            Path.Combine("NVSE", "Plugins", "nvse_stewie_tweaks.ini"),
+            discovery.DataRoot,
+            discovery.OverwriteRoot,
+            discovery.Profile);
+        if (main.Winner is not null)
+        {
+            files.Add((main, false));
+        }
+
+        files.AddRange(resolver.ResolveDirectoryFiles(
+                Path.Combine("NVSE", "Plugins", "Tweaks", "Gamesettings"),
+                ".ini",
+                discovery.DataRoot,
+                discovery.OverwriteRoot,
+                discovery.Profile)
+            .Values
+            .Where(resolution => resolution.Winner is not null)
+            .OrderBy(resolution => resolution.LogicalPath, StringComparer.OrdinalIgnoreCase)
+            .Select(resolution => (resolution, true)));
+
+        var parser = new StewieGameSettingIniParser();
+        var raw = new List<(IndexPostPluginGameSettingInput Input, bool ExtraDirectory)>();
+        var sequence = 0;
+        foreach (var item in files)
+        {
+            var winner = item.Resolution.Winner!;
+            IReadOnlyList<StewieGameSettingIniEntry> entries;
+            try
+            {
+                entries = parser.Parse(ReadIniLinesPreservingBytes(
+                    sourceFileSystem.ReadAllBytes(winner.PhysicalPath)));
+            }
+            catch (Exception exception) when (exception is DecoderFallbackException or IOException)
+            {
+                warnings.Add(
+                    $"Stewie GameSettings INI could not be read and was skipped: " +
+                    $"{winner.PhysicalPath}: {exception.Message}");
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                var decoded = decoder.Decode(entry.Value);
+                raw.Add((new IndexPostPluginGameSettingInput
+                {
+                    EditorId = entry.EditorId,
+                    Text = decoded.Text ?? string.Empty,
+                    Language = decoded.Language,
+                    EncodingEvidence = decoded.EncodingEvidence,
+                    Ambiguous = decoded.IsAmbiguous,
+                    LogicalPath = item.Resolution.LogicalPath,
+                    PhysicalPath = winner.PhysicalPath,
+                    SourceMod = winner.SourceName,
+                    EffectivePriority = winner.EffectivePriority,
+                    Sequence = sequence++,
+                }, item.ExtraDirectory));
+            }
+        }
+
+        var ambiguousExtraIds = raw
+            .Where(item => item.ExtraDirectory)
+            .GroupBy(item => item.Input.EditorId, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Select(item => item.Input.LogicalPath).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (ambiguousExtraIds.Count > 0)
+        {
+            warnings.Add(
+                $"Multiple Stewie Gamesettings INIs assign {ambiguousExtraIds.Count} string setting(s); " +
+                "their cross-file order is conservatively marked ambiguous.");
+        }
+
+        return raw.Select(item => ambiguousExtraIds.Contains(item.Input.EditorId)
+                ? item.Input with { Ambiguous = true }
+                : item.Input)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadIniLinesPreservingBytes(byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        System.Text.Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        string text;
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }))
+        {
+            text = new UTF8Encoding(false, true).GetString(bytes, 3, bytes.Length - 3);
+        }
+        else if (bytes.AsSpan().StartsWith(new byte[] { 0xFF, 0xFE }))
+        {
+            text = new UnicodeEncoding(false, true, true).GetString(bytes, 2, bytes.Length - 2);
+        }
+        else if (bytes.AsSpan().StartsWith(new byte[] { 0xFE, 0xFF }))
+        {
+            text = new UnicodeEncoding(true, true, true).GetString(bytes, 2, bytes.Length - 2);
+        }
+        else
+        {
+            // CP1252 is a reversible byte carrier for legacy FO3/FNV single-byte strings.
+            // StrictPluginStringDecoder then recovers the configured source/target code page
+            // or an unmarked UTF-8 sequence without losing the original bytes first.
+            text = System.Text.Encoding.GetEncoding(
+                1252,
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback).GetString(bytes);
+        }
+
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
     }
 
     private static string GetIndexPath(string workspace) => Path.Combine(workspace, "index", "falloutloc.sqlite");
@@ -1453,6 +1698,11 @@ public static class Program
             status.FailedPlugins,
             status.PartiallyParsedPlugins,
             status.CoverageGapRecords,
+            status.EngineGameSettings,
+            status.PostPluginGameSettingOverrides,
+            status.EngineGameSettingCatalogStatus,
+            status.EngineGameSettingCatalogPath,
+            status.RuntimeExecutablePath,
         },
     };
 
@@ -1476,6 +1726,11 @@ public static class Program
                 freshness.Snapshot.FailedPlugins,
                 freshness.Snapshot.PartiallyParsedPlugins,
                 freshness.Snapshot.CoverageGapRecords,
+                freshness.Snapshot.EngineGameSettings,
+                freshness.Snapshot.PostPluginGameSettingOverrides,
+                freshness.Snapshot.EngineGameSettingCatalogStatus,
+                freshness.Snapshot.EngineGameSettingCatalogPath,
+                freshness.Snapshot.RuntimeExecutablePath,
             },
     };
 
@@ -1490,10 +1745,16 @@ public static class Program
             IndexState = JsonIndexState(status),
             Pagination = pagination,
             Confidence = confidence,
-            Warnings = IndexWarnings(status.FailedPlugins, status.PartiallyParsedPlugins),
+            Warnings = IndexWarnings(
+                status.FailedPlugins,
+                status.PartiallyParsedPlugins,
+                status.EngineGameSettingWarnings),
         };
 
-    private static IReadOnlyList<string> IndexWarnings(int failedPlugins, int partiallyParsedPlugins = 0)
+    private static IReadOnlyList<string> IndexWarnings(
+        int failedPlugins,
+        int partiallyParsedPlugins = 0,
+        IEnumerable<string>? additionalWarnings = null)
     {
         var warnings = new List<string>();
         if (failedPlugins > 0)
@@ -1506,7 +1767,12 @@ public static class Program
             warnings.Add($"The index contains {partiallyParsedPlugins} partially parsed plugin(s); consult 'faloudit coverage'.");
         }
 
-        return warnings;
+        if (additionalWarnings is not null)
+        {
+            warnings.AddRange(additionalWarnings);
+        }
+
+        return warnings.Distinct(StringComparer.Ordinal).ToArray();
     }
 
     private static string ComputeFingerprint(
@@ -1514,6 +1780,7 @@ public static class Program
         InstallationDiscoveryResult discovery,
         IEnumerable<IndexPluginInput> plugins,
         IEnumerable<IndexPhysicalProviderInput> providers,
+        GameSettingInputs gameSettings,
         ReadOnlySourceGuard guard)
     {
         var value = new StringBuilder("falloutloc-profile-fingerprint-v2\n")
@@ -1544,6 +1811,39 @@ public static class Program
                 .Append(provider.IsWinner).Append('\0')
                 .Append(provider.FileLength).Append('\0')
                 .Append(provider.LastWriteUtc.Ticks).Append('\n');
+        }
+
+        value.Append("engine-gmst-extractor=").Append(GeckGameSettingCatalogExtractor.Version).Append('\0')
+            .Append(gameSettings.CatalogStatus).Append('\0')
+            .Append(gameSettings.CatalogPath).Append('\0')
+            .Append(gameSettings.RuntimeExecutablePath).Append('\n');
+        foreach (var setting in gameSettings.EngineSettings
+                     .OrderBy(setting => setting.EditorId, StringComparer.OrdinalIgnoreCase))
+        {
+            value.Append(setting.EditorId).Append('\0')
+                .Append(setting.DefaultText).Append('\0')
+                .Append(setting.Language).Append('\0')
+                .Append(setting.EncodingEvidence).Append('\n');
+        }
+
+        foreach (var setting in gameSettings.PostPluginSettings.OrderBy(setting => setting.Sequence))
+        {
+            value.Append(setting.EditorId).Append('\0')
+                .Append(setting.Text).Append('\0')
+                .Append(setting.LogicalPath).Append('\0')
+                .Append(setting.PhysicalPath).Append('\0')
+                .Append(setting.EffectivePriority).Append('\0')
+                .Append(setting.Ambiguous).Append('\n');
+        }
+
+        foreach (var executable in new[] { gameSettings.CatalogPath, gameSettings.RuntimeExecutablePath }
+                     .Where(path => path is not null)
+                     .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
+        {
+            var file = new FileInfo(guard.EnsureReadableSource(executable!));
+            value.Append(file.FullName).Append('\0')
+                .Append(file.Length).Append('\0')
+                .Append(file.LastWriteTimeUtc.Ticks).Append('\n');
         }
 
         foreach (var profileFile in new[]
@@ -1587,7 +1887,8 @@ public static class Program
         var operationallyHealthy = integrity.Equals("ok", StringComparison.OrdinalIgnoreCase);
         var warnings = IndexWarnings(
                 freshness.Snapshot?.FailedPlugins ?? 0,
-                freshness.Snapshot?.PartiallyParsedPlugins ?? 0)
+                freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
+                freshness.Snapshot?.EngineGameSettingWarnings)
             .Concat(operationallyHealthy || freshness.Snapshot is null
                 ? []
                 : new[] { $"SQLite quick_check reported an integrity problem: {integrity}" })
@@ -1627,6 +1928,14 @@ public static class Program
                 $"plugins: {freshness.Snapshot.ParsedPlugins} parsed, {freshness.Snapshot.FailedPlugins} failed");
             Console.WriteLine($"Database: {database!.Length:N0} bytes; backend: {freshness.Snapshot.BackendName}; " +
                 $"SQLite quick_check: {integrity}; age: {DateTime.UtcNow - freshness.Snapshot.CreatedUtc:g}");
+            Console.WriteLine($"Engine GameSettings: {freshness.Snapshot.EngineGameSettings} " +
+                $"({freshness.Snapshot.EngineGameSettingCatalogStatus}); " +
+                $"post-plugin overrides: {freshness.Snapshot.PostPluginGameSettingOverrides}");
+        }
+
+        foreach (var warning in warnings)
+        {
+            Console.WriteLine($"Warning: {warning}");
         }
 
         if (history.Count > 0)
@@ -1787,7 +2096,7 @@ public static class Program
         Console.WriteLine("  faloudit form <form-id|form-key> [--limit <n>] [--cursor <value>] [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit analyze <text> [--max-candidates <n>] [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit coverage [--issues <n>] [--workspace <path>] [--json]");
-        Console.WriteLine("  faloudit trace <form-key> [--workspace <path>] [--json]");
+        Console.WriteLine("  faloudit trace <form-key|gmst:editor-id> [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit explain <form-key> [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit regressions [winning-plugin] [--plugin <name>] [--mod <name>] [--type <type>] [--category <category>] [--confidence <high|medium|low|any>] [--exclude-file <path>] [--limit <n>] [--cursor <value>] [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit untranslated [winning-plugin] [--plugin <name>] [--mod <name>] [--type <type>] [--category <category>] [--confidence <high|medium|low|any>] [--exclude-file <path>] [--limit <n>] [--cursor <value>] [--workspace <path>] [--json]");
@@ -1836,7 +2145,21 @@ public static class Program
         ReadOnlySourceGuard Guard,
         IReadOnlyList<IndexPluginInput> Plugins,
         IReadOnlyList<IndexPhysicalProviderInput> Providers,
+        IReadOnlyList<IndexEngineGameSettingInput> EngineGameSettings,
+        IReadOnlyList<IndexPostPluginGameSettingInput> PostPluginGameSettings,
+        string EngineGameSettingCatalogStatus,
+        string? EngineGameSettingCatalogPath,
+        string? RuntimeExecutablePath,
+        IReadOnlyList<string> EngineGameSettingWarnings,
         string Fingerprint);
+
+    private sealed record GameSettingInputs(
+        IReadOnlyList<IndexEngineGameSettingInput> EngineSettings,
+        IReadOnlyList<IndexPostPluginGameSettingInput> PostPluginSettings,
+        string CatalogStatus,
+        string? CatalogPath,
+        string? RuntimeExecutablePath,
+        IReadOnlyList<string> Warnings);
 
     private sealed record IndexHistoryEntry
     {

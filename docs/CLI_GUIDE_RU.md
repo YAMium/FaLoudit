@@ -76,6 +76,11 @@ $profileName = 'Default'
 
 Не начинайте диагностику строк, пока `doctor` не завершится успешно и не будет опубликован рабочий индекс. При ошибке или отмене индексации предыдущая база сохраняется.
 
+Для встроенных строковых GameSettings FaLoudit читает установленный `GECK.exe`,
+не запуская его, и сохраняет локальный каталог EditorID/исходных значений. Если
+GECK отсутствует, плагины всё равно индексируются, но статус индекса содержит
+предупреждение `engineGameSettingCatalogStatus`.
+
 ## 5. Анализ видимой строки
 
 `analyze` — основной способ начать поиск:
@@ -133,6 +138,19 @@ $reportedText = 'Advanced Targeting Sensor'
 & $falouditExe explain '0CE224:FalloutNV.esm' --workspace $falouditWorkspace --json
 & $falouditExe trace '0CE224:FalloutNV.esm' --workspace $falouditWorkspace --json
 ```
+
+У engine GameSettings используется синтетический идентификатор, а не FormID:
+
+```powershell
+& $falouditExe analyze 'How many?' --workspace $falouditWorkspace --json
+& $falouditExe edid 'sHowMany' --workspace $falouditWorkspace --json
+& $falouditExe trace 'gmst:sHowMany' --workspace $falouditWorkspace --json
+```
+
+Цепочка содержит исходное значение движка, активные GMST из ESM/ESP,
+сопоставленные по EditorID, и победившие `[GameSettings]` из Stewie’s Tweaks.
+Последний слой применяется после ESP и поэтому способен перекрыть даже поздний
+плагин.
 
 Обе команды поддерживают `--exact`, `--contains` или `--regex`; `--ignore-case`; фильтры plugin/type; `--winner-only`; пагинацию через cursor. У `find` также есть `--category`, а у `content` — `--source-kind`. Полный машинный интерфейс описан в `--help` и [JSON-контракте](../JSON_CONTRACT_V2.md).
 

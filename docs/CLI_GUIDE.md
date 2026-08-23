@@ -76,6 +76,11 @@ Configuration is written only to `$falouditWorkspace\config`.
 
 Do not start diagnosing strings until `doctor` is healthy and a usable index has been published. A failed or cancelled index build preserves the previous published database.
 
+For hardcoded string GameSettings, FaLoudit reads the installed `GECK.exe`
+without launching it and stores a local EditorID/default-value catalog. If GECK
+is unavailable, plugin indexing still completes but index status contains an
+`engineGameSettingCatalogStatus` warning.
+
 ## 5. Analyze a visible string
 
 `analyze` is the preferred entry point:
@@ -133,6 +138,18 @@ Resolve identifiers and inspect one record:
 & $falouditExe explain '0CE224:FalloutNV.esm' --workspace $falouditWorkspace --json
 & $falouditExe trace '0CE224:FalloutNV.esm' --workspace $falouditWorkspace --json
 ```
+
+Engine GameSettings use a synthetic identity rather than a FormID:
+
+```powershell
+& $falouditExe analyze 'How many?' --workspace $falouditWorkspace --json
+& $falouditExe edid 'sHowMany' --workspace $falouditWorkspace --json
+& $falouditExe trace 'gmst:sHowMany' --workspace $falouditWorkspace --json
+```
+
+The trace orders the engine default, active ESM/ESP GMST assignments matched by
+EditorID, and MO2-winning Stewie Tweaks `[GameSettings]` assignments. The last
+layer is applied after ESPs and can therefore supersede a late plugin.
 
 Both commands support `--exact`, `--contains`, or `--regex`; `--ignore-case`; plugin/type filters; `--winner-only`; and cursor pagination. `find` also has `--category`, while `content` has `--source-kind`. Use `--help` and the [JSON contract](../JSON_CONTRACT_V2.md) for the complete machine-readable interface.
 

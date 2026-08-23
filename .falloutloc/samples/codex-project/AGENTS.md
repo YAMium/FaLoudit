@@ -151,7 +151,7 @@ When `analysis.status` is `noMatches`, inspect `contentFallback` before searchin
 - Check `isWinningOverride`, plugin, source mod, FormKey, EditorID, and `trace`/`explain` evidence before calling a candidate likely to be the active source.
 - If context is insufficient, use `content` with a more distinctive fragment or continue to the manual fallback; do not promote a weak candidate to certainty.
 
-When `manualFallbackRecommended` is true, preserve the existing manual investigation ability. Search relevant active plugins, compiled scripts without saved source, loose virtual Data files, archives, and—when evidence points there—hardcoded executable strings using read-only tools. If an extractor requires writes, first copy the source into this project's `.falloutloc/samples` and operate only on the copy. Never change or save the build.
+When `manualFallbackRecommended` is true, preserve the existing manual investigation ability. Search relevant active plugins, compiled scripts without saved source, loose virtual Data files, archives, and—when evidence points there—hardcoded executable strings outside FaLoudit's validated GameSetting catalog using read-only tools. If an extractor requires writes, first copy the source into this project's `.falloutloc/samples` and operate only on the copy. Never change or save the build.
 
 Apply the same semantic review to a manually found script candidate. If no candidate is found after automatic and manual attempts, report that fact and ask for one useful discriminator such as where the text appears, a longer fragment, or a screenshot. Do not guess a FormID.
 
@@ -166,6 +166,13 @@ For every plausible candidate, capture:
 - whether that occurrence is the winning override;
 - semantic field path and category;
 - language and encoding evidence.
+
+When `formKey` starts with `gmst:`, treat it as a synthetic engine GameSetting
+identity, not a hexadecimal FormID. Use `explain gmst:<EditorID>` and
+`trace gmst:<EditorID>`. Its value chain is engine default, active ESM/ESP GMST
+assignments matched by EditorID, then MO2-winning Stewie Tweaks
+`[GameSettings]` INIs applied after plugins. Do not describe an INI winner as a
+plugin record.
 
 The `analyze` response already includes the full `explain` result for every leading candidate. Run the lower-level command directly only for a FormKey supplied by the user or when following up a manual `find` result:
 
@@ -200,6 +207,11 @@ Determine:
 - which later plugin replaced it and with what value;
 - whether this is a high-confidence target-to-source regression, an untranslated winner, an empty winner, a structural change, an encoding problem, or an ambiguous case;
 - whether a file-level MO2 conflict and a record-level override conflict are both involved.
+
+For a `gmst:` result, identify the exact GameSetting EditorID and whether the
+runtime winner comes from the engine default, a plugin GMST, or a post-plugin
+INI. A low-load-order plugin is not necessarily final when Stewie's
+`[GameSettings]` layer assigns the same name.
 
 Never describe a physical file winner as if it were automatically the winning record. Keep those two conclusions separate.
 

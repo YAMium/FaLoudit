@@ -14,6 +14,8 @@ public sealed class SourceFileSystem(ReadOnlySourceGuard guard) : ISourceFileSys
     public IReadOnlyList<string> ReadAllLines(string path) =>
         File.ReadAllLines(guard.EnsureReadableSource(path), Encoding.UTF8);
 
+    public byte[] ReadAllBytes(string path) => File.ReadAllBytes(guard.EnsureReadableSource(path));
+
     public IEnumerable<string> EnumerateDirectories(string path) =>
         Directory.EnumerateDirectories(guard.EnsureReadableSource(path), "*", SearchOption.TopDirectoryOnly);
 

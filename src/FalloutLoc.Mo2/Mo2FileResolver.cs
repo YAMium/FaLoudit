@@ -124,6 +124,97 @@ public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
         };
     }
 
+    public IReadOnlyDictionary<string, PhysicalFileResolution> ResolveDirectoryFiles(
+        string logicalDataDirectory,
+        string extension,
+        string gameDataRoot,
+        string overwriteRoot,
+        Mo2ProfileSnapshot profile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalDataDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(extension);
+        var logicalDirectory = NormalizeLogicalPath(logicalDataDirectory, nameof(logicalDataDirectory));
+        var normalizedExtension = extension.StartsWith('.') ? extension : "." + extension;
+        var providers = new Dictionary<string, List<PhysicalFileProvider>>(StringComparer.OrdinalIgnoreCase);
+
+        AddRoot(gameDataRoot, PhysicalSourceKind.GameData, "Data", -1, null);
+        foreach (var entry in profile.ModEntries.Where(entry =>
+                     entry.Enabled && entry.DirectoryExists && !entry.IsSeparator))
+        {
+            AddRoot(entry.Directory, PhysicalSourceKind.Mod, entry.Name, entry.EffectivePriority, entry.ProfileLine);
+        }
+
+        AddRoot(overwriteRoot, PhysicalSourceKind.Overwrite, "overwrite", long.MaxValue, null);
+        return providers.ToDictionary(
+            item => item.Key,
+            item => new PhysicalFileResolution
+            {
+                LogicalPath = item.Key,
+                Providers = item.Value
+                    .OrderByDescending(provider => provider.EffectivePriority)
+                    .ThenBy(provider => provider.SourceName, StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+            },
+            StringComparer.OrdinalIgnoreCase);
+
+        void AddRoot(
+            string dataRoot,
+            PhysicalSourceKind kind,
+            string sourceName,
+            long effectivePriority,
+            int? profileLine)
+        {
+            var physicalDirectory = Path.Combine(dataRoot, logicalDirectory);
+            if (!sourceFileSystem.DirectoryExists(physicalDirectory))
+            {
+                return;
+            }
+
+            var pending = new Stack<string>();
+            pending.Push(physicalDirectory);
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                foreach (var child in sourceFileSystem.EnumerateDirectories(directory))
+                {
+                    pending.Push(child);
+                }
+
+                foreach (var file in sourceFileSystem.EnumerateFiles(directory)
+                             .Where(file => Path.GetExtension(file).Equals(
+                                 normalizedExtension,
+                                 StringComparison.OrdinalIgnoreCase)))
+                {
+                    var relative = Path.GetRelativePath(physicalDirectory, file);
+                    var logicalPath = Path.Combine(logicalDirectory, relative);
+                    if (!providers.TryGetValue(logicalPath, out var candidates))
+                    {
+                        candidates = [];
+                        providers.Add(logicalPath, candidates);
+                    }
+
+                    candidates.Add(Create(
+                        logicalPath, file, kind, sourceName, effectivePriority, profileLine));
+                }
+            }
+        }
+    }
+
+    private static string NormalizeLogicalPath(string logicalDataPath, string parameterName)
+    {
+        var logical = logicalDataPath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar);
+        if (logical.Length == 0 || Path.IsPathRooted(logical)
+            || logical.Split(Path.DirectorySeparatorChar).Any(component => component == ".."))
+        {
+            throw new ArgumentException(
+                "Logical Data path must be a relative path without parent traversal.",
+                parameterName);
+        }
+
+        return logical;
+    }
+
     private static PhysicalFileProvider Create(
         string logicalPath,
         string physicalPath,

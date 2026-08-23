@@ -1,7 +1,7 @@
 # FaLoudit Localization Coverage Catalog
 
 Catalog version: 1
-Index schema: 2
+Index schema: 6
 
 This catalog describes user-visible FO3/FNV/TTW plugin fields that the current read-only Mutagen backend extracts and indexes. `faloudit coverage --json` embeds the same machine-readable `supportedFields` catalog and reports actual counts from the published snapshot.
 
@@ -52,13 +52,34 @@ Specialized nested contracts are:
 | `PlacedObject` | `AudioData.LocationName` | `radio-location` |
 | `Region` | `MapName.Map` | `region-map-name` |
 
+## Engine GameSettings
+
+FaLoudit 0.4.1 also indexes string GameSettings initialized outside ordinary
+plugin records. The default EditorID/value catalog is extracted read-only from
+the user's installed `GECK.exe`; Bethesda strings are not bundled with
+FaLoudit. FNV and TTW use the New Vegas GECK/runtime pair, while Fallout 3 uses
+its own GECK/runtime pair.
+
+GameSettings have no meaningful plugin FormID at the engine-default layer, so
+FaLoudit exposes `gmst:<EditorID>` identities such as `gmst:sHowMany`. A trace
+joins values by EditorID in this order:
+
+1. engine default;
+2. active ESM/ESP `GameSettingString.Data` assignments;
+3. MO2-winning Stewie Tweaks `[GameSettings]` INIs applied after plugins.
+
+If GECK is unavailable or its constructor table cannot be validated, plugin
+indexing continues and the snapshot exposes an actionable catalog warning.
+
 ## Current explicit limitation
 
 `find` covers only audited localization fields. FaLoudit 0.3 indexes saved source from top-level `Script` records and nested INFO begin/end, quest-stage, terminal-menu, package-event, perk-effect, and patrol scripts in the separate `content` layer. `analyze` queries that layer automatically only after localization fields have no match.
 
-Saved source proves static presence, not runtime execution. Compiled bytecode without source is not decoded; loose files, BSA content, and executable strings are not yet automatically indexed. A miss therefore emits `manualFallbackRecommended` instead of claiming absence. Script coverage gaps remain visible and are not plugin corruption.
+Saved source proves static presence, not runtime execution. Compiled bytecode without source is not decoded; loose files and BSA content are not yet automatically indexed. A miss therefore emits `manualFallbackRecommended` instead of claiming absence. Script coverage gaps remain visible and are not plugin corruption.
 
-Hardcoded strings originating only from `FalloutNV.exe`, such as the known `sTo` case, remain outside plugin coverage.
+Engine string coverage is limited to validated `s*` GameSettings. Arbitrary
+hardcoded executable text that is not part of that catalog remains outside the
+index and may require manual read-only investigation.
 
 ## Correctness evidence
 
