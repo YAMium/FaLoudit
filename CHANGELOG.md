@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-08-23
+
+- Updated the self-contained Windows runtime to .NET 10.0.11 security servicing.
+- Updated Microsoft.Data.Sqlite to 10.0.11 and aligned its SQLitePCLRaw 2.1.x dependency graph.
+- Updated the xUnit Visual Studio test adapter to 3.1.5.
+
 ## 0.3.1 — 2026-08-23
 
 - Prepared the first public release under GPL-3.0-only.

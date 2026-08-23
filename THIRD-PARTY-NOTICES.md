@@ -46,10 +46,10 @@ License text: `LICENSE`.
 
 ## Apache License 2.0
 
-- SQLitePCLRaw.bundle_e_sqlite3 2.1.11
-- SQLitePCLRaw.core 2.1.11
+- SQLitePCLRaw.bundle_e_sqlite3 2.1.12
+- SQLitePCLRaw.core 2.1.12
 - SQLitePCLRaw.lib.e_sqlite3 2.1.12
-- SQLitePCLRaw.provider.e_sqlite3 2.1.11
+- SQLitePCLRaw.provider.e_sqlite3 2.1.12
   - Copyright 2014-2024 SourceGear, LLC
   - Source: https://github.com/ericsink/SQLitePCL.raw
 
@@ -63,11 +63,11 @@ License text: `licenses/Apache-2.0.txt`.
 - K4os.Compression.LZ4 1.3.8 — Milosz Krajewski
 - K4os.Compression.LZ4.Streams 1.3.8 — Milosz Krajewski
 - K4os.Hash.xxHash 1.0.8 — Milosz Krajewski
-- Microsoft.Data.Sqlite 10.0.10 — Microsoft Corporation
-- Microsoft.Data.Sqlite.Core 10.0.10 — Microsoft Corporation
+- Microsoft.Data.Sqlite 10.0.11 — Microsoft Corporation
+- Microsoft.Data.Sqlite.Core 10.0.11 — Microsoft Corporation
 - Microsoft.Extensions.DependencyInjection.Abstractions 9.0.4 — Microsoft Corporation
 - Microsoft.Extensions.Logging.Abstractions 9.0.4 — Microsoft Corporation
-- Microsoft.NET.ILLink.Tasks 10.0.10 — Microsoft Corporation
+- Microsoft.NET.ILLink.Tasks 10.0.11 — Microsoft Corporation
 - OneOf 3.0.271 — Harry McIntyre
 - SharpZipLib 1.4.2 — SharpZipLib contributors
 - StrongInject 1.4.4 — StrongInject contributors

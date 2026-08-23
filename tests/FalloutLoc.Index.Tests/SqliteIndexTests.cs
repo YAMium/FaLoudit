@@ -11,6 +11,21 @@ namespace FalloutLoc.Index.Tests;
 public sealed class SqliteIndexTests
 {
     [Fact]
+    public void BundledSqliteMeetsSecurityBaseline()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT sqlite_version();";
+
+        var versionText = Assert.IsType<string>(command.ExecuteScalar());
+        var version = Version.Parse(versionText);
+
+        Assert.True(version >= new Version(3, 50, 2),
+            $"Bundled SQLite {version} is older than the 3.50.2 security baseline.");
+    }
+
+    [Fact]
     public void BuildsSearchableIndexAndResolvesWinningOverride()
     {
         using var area = new TestArea();

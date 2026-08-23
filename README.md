@@ -100,8 +100,8 @@ Outputs:
 ```text
 .falloutloc/cache/publish/win-x64/faloudit.exe
 .falloutloc/cache/publish/win-x64/e_sqlite3.dll
-.falloutloc/cache/packages/faloudit-0.3.1-win-x64.zip
-.falloutloc/cache/packages/faloudit-codex-project-0.3.1.zip
+.falloutloc/cache/packages/faloudit-0.3.2-win-x64.zip
+.falloutloc/cache/packages/faloudit-codex-project-0.3.2.zip
 .falloutloc/reports/faloudit-win-x64.sha256
 ```
 
@@ -112,7 +112,7 @@ After extracting the ZIP, run `faloudit.exe` from PowerShell or a terminal. The 
   --profile 'Default' --workspace 'D:\FaLouditWorkspace\.falloutloc'
 ```
 
-For a ready-to-open Codex project, extract `faloudit-codex-project-0.3.1.zip`. It already contains the root `AGENTS.md`, a first-prompt template, instructions, and the packaged utility under `tools/faloudit`.
+For a ready-to-open Codex project, extract `faloudit-codex-project-0.3.2.zip`. It already contains the root `AGENTS.md`, a first-prompt template, instructions, and the packaged utility under `tools/faloudit`.
 
 ## Commands
 

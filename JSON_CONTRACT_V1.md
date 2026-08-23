@@ -9,7 +9,7 @@ Every JSON response is one object with these required fields:
 | Field | Type | Meaning |
 |---|---|---|
 | `schemaVersion` | integer | JSON contract version. It is `1` for this contract. |
-| `applicationVersion` | string | Three-part FaLoudit assembly version, for example `0.3.1`. |
+| `applicationVersion` | string | Three-part FaLoudit assembly version, for example `0.3.2`. |
 | `command` | string | Lowercase command name that produced the response. |
 | `success` | boolean | Whether the requested operation produced a usable result. A successfully completed warning state can still use exit code 2. |
 | `exitCode` | integer | The same process exit code returned by the executable. |
@@ -119,7 +119,7 @@ The JSON `exitCode` and process exit code always match. A status-style command c
 ```json
 {
   "schemaVersion": 1,
-  "applicationVersion": "0.3.1",
+  "applicationVersion": "0.3.2",
   "command": "find",
   "success": true,
   "exitCode": 0,

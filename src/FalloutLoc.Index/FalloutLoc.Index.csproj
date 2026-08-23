@@ -3,7 +3,7 @@
     <RootNamespace>FalloutLoc.Index</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="[10.0.10]" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="[10.0.11]" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="[2.1.12]" />
   </ItemGroup>
   <ItemGroup>
