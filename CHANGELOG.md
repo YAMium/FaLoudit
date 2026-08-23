@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-08-23
 
 - Added mandatory explicit `sourceLanguage` and `targetLanguage` project settings.
 - Added conservative language profiles for Windows-1250, Windows-1251,
