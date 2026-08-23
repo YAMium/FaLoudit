@@ -4,9 +4,9 @@
     "net10.0": {
       "coverlet.collector": {
         "type": "Direct",
-        "requested": "[6.0.4, )",
-        "resolved": "6.0.4",
-        "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
+        "requested": "[10.0.1, )",
+        "resolved": "10.0.1",
+        "contentHash": "27jXSV/0DbVqF5jDrAxuQFZ9oaz6gmG03p8ttxAFk+X0M4woFYj7MoWDLCna5EGLb0CE6OE7X6ZH3Wt5smTtaA=="
       },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
@@ -383,13 +383,13 @@
       "falloutloc.analysis": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Index": "[1.0.0, )"
+          "FalloutLoc.Index": "[0.3.1, )"
         }
       },
       "falloutloc.backends": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Core": "[1.0.0, )",
+          "FalloutLoc.Core": "[0.3.1, )",
           "Mutagen.Bethesda.Fallout3": "[0.54.4, 0.54.4]"
         }
       },
@@ -399,8 +399,8 @@
       "falloutloc.index": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Backends": "[1.0.0, )",
-          "FalloutLoc.Core": "[1.0.0, )",
+          "FalloutLoc.Backends": "[0.3.1, )",
+          "FalloutLoc.Core": "[0.3.1, )",
           "Microsoft.Data.Sqlite": "[10.0.10, 10.0.10]",
           "SQLitePCLRaw.lib.e_sqlite3": "[2.1.12, 2.1.12]"
         }
