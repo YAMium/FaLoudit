@@ -18,7 +18,6 @@ jobs:
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       - name: Restore locked dependencies
-        # The CLI lock file also covers the self-contained win-x64 publish graph.
-        run: dotnet restore .\FaLoudit.slnx -p:PublishProfile=WinX64 --locked-mode
+        run: dotnet restore .\FaLoudit.slnx --locked-mode
       - name: Test
         run: dotnet test .\FaLoudit.slnx -c Release --no-restore --nologo

@@ -288,7 +288,7 @@
       "falloutloc.backends": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Core": "[1.0.0, )",
+          "FalloutLoc.Core": "[0.3.1, )",
           "Mutagen.Bethesda.Fallout3": "[0.54.4, 0.54.4]"
         }
       },

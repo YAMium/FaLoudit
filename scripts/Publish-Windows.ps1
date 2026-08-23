@@ -7,6 +7,7 @@ $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot '.fallout
 $outputDirectory = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot 'cache\publish\win-x64'))
 $codexProjectDirectory = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot 'cache\publish\codex-project'))
 $packagesDirectory = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot 'cache\packages'))
+$publishLocksDirectory = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot 'cache\publish-locks'))
 $reportsDirectory = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot 'reports'))
 $codexTemplateDirectory = Join-Path $workspaceRoot 'samples\codex-project'
 $project = Join-Path $projectRoot 'src\FalloutLoc.Cli\FalloutLoc.Cli.csproj'
@@ -36,7 +37,7 @@ foreach ($requiredFile in @(
     }
 }
 
-foreach ($destination in @($outputDirectory, $codexProjectDirectory, $packagesDirectory, $reportsDirectory)) {
+foreach ($destination in @($outputDirectory, $codexProjectDirectory, $packagesDirectory, $publishLocksDirectory, $reportsDirectory)) {
     if (-not $destination.StartsWith($workspaceRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Packaging destination escaped the project workspace: $destination"
     }
@@ -52,6 +53,7 @@ if (Test-Path -LiteralPath $codexProjectDirectory) {
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $codexProjectDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $packagesDirectory | Out-Null
+New-Item -ItemType Directory -Force -Path $publishLocksDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $reportsDirectory | Out-Null
 
 & $dotnet publish $project -c Release -p:PublishProfile=WinX64 -p:PublishDir="$outputDirectory\" -p:DebugType=None -p:DebugSymbols=false

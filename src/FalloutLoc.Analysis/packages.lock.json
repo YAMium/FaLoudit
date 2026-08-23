@@ -286,7 +286,7 @@
       "falloutloc.backends": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Core": "[1.0.0, )",
+          "FalloutLoc.Core": "[0.3.1, )",
           "Mutagen.Bethesda.Fallout3": "[0.54.4, 0.54.4]"
         }
       },
@@ -296,8 +296,8 @@
       "falloutloc.index": {
         "type": "Project",
         "dependencies": {
-          "FalloutLoc.Backends": "[1.0.0, )",
-          "FalloutLoc.Core": "[1.0.0, )",
+          "FalloutLoc.Backends": "[0.3.1, )",
+          "FalloutLoc.Core": "[0.3.1, )",
           "Microsoft.Data.Sqlite": "[10.0.10, 10.0.10]",
           "SQLitePCLRaw.lib.e_sqlite3": "[2.1.12, 2.1.12]"
         }
