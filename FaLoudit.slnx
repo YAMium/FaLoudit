@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FalloutLoc.Analysis/FalloutLoc.Analysis.csproj" />
+    <Project Path="src/FalloutLoc.Backends/FalloutLoc.Backends.csproj" />
+    <Project Path="src/FalloutLoc.Cli/FalloutLoc.Cli.csproj" />
+    <Project Path="src/FalloutLoc.Core/FalloutLoc.Core.csproj" />
+    <Project Path="src/FalloutLoc.Index/FalloutLoc.Index.csproj" />
+    <Project Path="src/FalloutLoc.Mo2/FalloutLoc.Mo2.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FalloutLoc.Analysis.Tests/FalloutLoc.Analysis.Tests.csproj" />
+    <Project Path="tests/FalloutLoc.Backends.Tests/FalloutLoc.Backends.Tests.csproj" />
+    <Project Path="tests/FalloutLoc.Cli.Tests/FalloutLoc.Cli.Tests.csproj" />
+    <Project Path="tests/FalloutLoc.Core.Tests/FalloutLoc.Core.Tests.csproj" />
+    <Project Path="tests/FalloutLoc.Index.Tests/FalloutLoc.Index.Tests.csproj" />
+    <Project Path="tests/FalloutLoc.Mo2.Tests/FalloutLoc.Mo2.Tests.csproj" />
+  </Folder>
+</Solution>

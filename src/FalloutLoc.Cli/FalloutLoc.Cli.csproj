@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FalloutLoc.Cli</RootNamespace>
+    <AssemblyName>faloudit</AssemblyName>
+    <Product>FaLoudit — Fallout Localization Auditor</Product>
+    <Description>Read-only Fallout 3, Fallout New Vegas, and TTW localization diagnostics.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FalloutLoc.Analysis/FalloutLoc.Analysis.csproj" />
+    <ProjectReference Include="../FalloutLoc.Backends/FalloutLoc.Backends.csproj" />
+    <ProjectReference Include="../FalloutLoc.Core/FalloutLoc.Core.csproj" />
+    <ProjectReference Include="../FalloutLoc.Index/FalloutLoc.Index.csproj" />
+    <ProjectReference Include="../FalloutLoc.Mo2/FalloutLoc.Mo2.csproj" />
+  </ItemGroup>
+</Project>

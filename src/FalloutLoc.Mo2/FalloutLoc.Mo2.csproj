@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>FalloutLoc.Mo2</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FalloutLoc.Core/FalloutLoc.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+TestResults/
+*.user
+*.suo
+.DS_Store
+.falloutloc/config/
+.falloutloc/cache/
+.falloutloc/index/
+.falloutloc/logs/
+.falloutloc/fixtures/
+.falloutloc/reports/
