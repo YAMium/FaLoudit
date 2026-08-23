@@ -1,276 +1,132 @@
-# FaLoudit
+<p align="center">
+  <img src="docs/assets/faloudit-logo.png" alt="FaLoudit" width="760">
+</p>
 
-[![CI](https://github.com/YAMium/FaLoudit/actions/workflows/ci.yml/badge.svg)](https://github.com/YAMium/FaLoudit/actions/workflows/ci.yml)
-[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+<p align="center">
+  <strong>Paste the broken line. Trace the winning override.</strong><br>
+  A read-only localization investigator for Fallout 3, Fallout: New Vegas, and Tale of Two Wastelands.
+</p>
 
-**FaLoudit** is short for **Fallout Localization Auditor**.
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.ru.md">Русский</a>
+</p>
 
-Read-only diagnostic CLI for Fallout 3, Fallout: New Vegas, and Tale of Two Wastelands localization conflicts.
+<p align="center">
+  <a href="https://github.com/YAMium/FaLoudit/actions/workflows/ci.yml"><img src="https://github.com/YAMium/FaLoudit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/YAMium/FaLoudit/releases/latest"><img src="https://img.shields.io/github/v/release/YAMium/FaLoudit?display_name=tag&sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue.svg" alt="GPL-3.0-only"></a>
+</p>
 
-The public command and executable are `faloudit` / `faloudit.exe`. The existing `.falloutloc` workspace, `falloutloc.sqlite` database, fingerprint prefix, and internal `FalloutLoc.*` assemblies intentionally retain their v0.1 names. Store formats remain versioned: 0.4 requires explicit configuration migration and an atomic index rebuild.
+## What is FaLoudit?
 
-The tool is being built to answer:
+**FaLoudit** means **Fallout Localization Auditor**. It is a local Windows CLI and a ready-made AI investigation workspace for answering one practical question:
 
-> Why is this exact text visible, which physical MO2 file and plugin record override won, and where was the configured target-language translation lost?
+> Why is this exact text visible in game, which plugin and physical MO2 file won, and where was the target-language translation lost?
 
-## Current production milestone
+FaLoudit does the deterministic work: it discovers the active MO2 profile, indexes localization fields and saved script source, resolves record override chains, and maps the winning plugin file back to its MO2 mod. A terminal-capable AI assistant such as Codex can run those commands, interpret the JSON evidence, and return a concise diagnosis instead of a wall of raw records.
 
-Implemented:
+It does **not** edit plugins, generate patches, sort load order, or alter the game setup.
 
-- strict source/workspace safety boundary;
-- portable and split-path MO2 discovery;
-- active-profile parsing;
-- authoritative `plugins.txt` / `loadorder.txt` consistency check;
-- exact reversed `modlist.txt` priority handling;
-- separators excluded from mod counts and providers;
-- logical Data path to ordered physical provider chain;
-- `overwrite` as the highest-priority provider;
-- project configuration stored atomically under `.falloutloc/config`;
-- `discover`, `configure`, and `doctor` commands;
-- JSON output and automated safety/MO2 tests;
-- backend-neutral plugin, record, string, and override DTOs;
-- exact Mutagen `0.54.4` lock in read-only overlay mode;
-- explicit `sourceLanguage` / `targetLanguage` configuration with Windows-1250, 1251, 1252, and 1254 target profiles;
-- strict CP1252 byte recovery with configured target-code-page/UTF-8/ambiguity evidence;
-- semantic extraction for names, dialogue, quests, terminals, messages, notes, perks, factions, body parts, map markers, radio locations, and regions;
-- separate content extraction for top-level SCPT source and nested INFO begin/end, quest-stage, terminal-menu, package-event, perk-effect, and patrol result scripts;
-- backend-neutral override tracing and xEdit-oracle integration tests;
-- versioned SQLite snapshot with physical MO2 provider chains, active plugin metadata, records, strings, language and encoding evidence;
-- transactional per-plugin indexing and atomic publication of only a complete database;
-- indexed `find` and `trace` commands with JSON output, winning override, physical path, source mod, and MO2 effective priority;
-- indexed `content` command with exact/contains/regex modes, bounded context, record winner evidence, untrusted-data flags, and GPT review requirement.
-- 0.2 Search API with exact/contains/regex text modes, case handling, plugin/type/category/winner filters, query-bound cursor pagination, exact EditorID lookup, and FormID/FormKey resolution;
-- high-level `analyze` command with freshness enforcement, deterministic candidate ranking, ambiguity reporting, full override diagnosis, physical plugin winner, and MO2 source mapping in one call;
-- automatic `analyze` fallback from localization fields to content candidates, structured semantic-GPT review, and an explicit manual-search recommendation when both indexes miss;
-- stable additive JSON schema v1 with application/command versions, canonical profile context, index state, warnings, confidence, pagination, typed error codes, and documented exit codes;
-- index schema v5 with language-pair snapshot metadata, generic source/target roles, a separate record-content table and record-level `parsed` / `partiallyParsed` / `notApplicable` / `unverified` coverage;
-- `explain` diagnostics for one FormKey with field-by-field history, target-to-source regression status, confidence, encoding evidence, and both winner levels;
-- `regressions` and `untranslated` bulk review with plugin/mod/type/category filters, query-bound cursor pagination, confidence thresholds, exact-text exclusions, and diagnostic deduplication;
-- conservative `untranslated` review candidates with technical asset-path filtering and an explicit low-confidence caveat;
-- structural-change protection for ordinal TERM, MESG, and quest-log lists.
-- strict index freshness checks over profile files, load order, physical provider chains, and plugin metadata;
-- fresh-index no-op plus explicit `index --status` and `index --rebuild` modes;
-- versioned per-plugin cache identity and atomic reuse of unchanged plugin data;
-- `index --reparse` for an explicit full backend parse without cache reuse;
-- versioned self-contained Windows x64 package with no installed .NET requirement;
-- packaging safety check that prevents native bundle extraction outside the workspace;
-- atomic Markdown/JSON/CSV/HTML report export under `.falloutloc/reports`;
-- named diagnostic snapshots plus `compare` reports for added, resolved, and unchanged localization problems;
-- one-pass active-plugin provider mapping, keeping real-profile `analyze` startup near one second;
-- `index --status` database size/age/backend/history output and SQLite `quick_check` corruption diagnostics.
+## Fastest start: Codex project
 
-Version 0.4 adds multilingual localization pairs while retaining the read-only v0.3 investigation pipeline. See [docs/MULTILINGUAL_DESIGN_0.4.md](docs/MULTILINGUAL_DESIGN_0.4.md) for migration and detection rules. The machine-readable CLI contract is documented in [JSON_CONTRACT_V2.md](JSON_CONTRACT_V2.md), and index maintenance in [OPERATIONS.md](OPERATIONS.md).
+1. Open the [latest release](https://github.com/YAMium/FaLoudit/releases/latest).
+2. Download `faloudit-codex-project-<version>.zip` — for example, `faloudit-codex-project-0.4.0.zip`.
+3. Extract it to a new folder **outside** the game and MO2 directories.
+4. Open that folder as a project in Codex.
+5. Send this first message:
 
-The supported localization fields and explicit extraction limitations are documented in [COVERAGE_CATALOG.md](COVERAGE_CATALOG.md).
+> Prepare FaLoudit for use according to the project instructions. Check the executable, configuration, source and target languages, active profile, doctor result, and index yourself. Ask only for genuinely missing information. When ready, report the selected language pair and profile, then say that you are ready to accept problematic strings for search and analysis. Answer in English.
 
-## Safety
+Codex will ask for only the information it cannot discover safely, normally:
 
-Game, MO2, TTW, profile, mod, `Data`, and `overwrite` directories are read-only sources. The production write API accepts destinations only under:
+- the root of the Fallout/MO2 build;
+- `sourceLanguage` and `targetLanguage`, such as `en -> ru`, `en -> pl`, or `en -> de`;
+- the exact MO2 profile only when discovery finds a real ambiguity.
 
-```text
-.falloutloc/config
-.falloutloc/cache
-.falloutloc/index
-.falloutloc/logs
-.falloutloc/reports
-.falloutloc/samples
-.falloutloc/fixtures
+Initial indexing can take a little time. Once Codex reports readiness, send a visible problem string as an ordinary chat message:
+
+> Now, who can tell me the primary components of gunpowder?
+
+or add context:
+
+> This English line appears in Elder Lyons' dialogue instead of the translation: Now, who can tell me the primary components of gunpowder?
+
+Codex then runs the required FaLoudit searches itself and should return the record, relevant override chain, winning plugin, physical file, source MO2 mod, confidence, and limitations.
+
+## What happens under the hood?
+
+```mermaid
+flowchart LR
+    A[Visible problem text] --> B[FaLoudit analyze]
+    B --> C{Indexed localization match?}
+    C -->|Yes| D[Record override chain]
+    C -->|No| E[Saved script content]
+    E -->|Still missing| F[Read-only manual fallback]
+    D --> G[Winning plugin record]
+    G --> H[Physical MO2 file and source mod]
+    E --> H
+    F --> H
+    H --> I[AI-assisted final diagnosis]
 ```
 
-Lexical path traversal and reparse-point escapes are rejected. Configuration and index publication use staged files in the destination directory followed by an atomic replacement. A failed or cancelled index build preserves the previous database.
+FaLoudit deliberately keeps two kinds of winners separate:
 
-## Build and test
+- **record winner** — the last active plugin override for the matching FormKey;
+- **physical file winner** — the MO2 mod that supplies that plugin file to the virtual `Data` tree.
 
-This workspace currently uses the pinned .NET SDK in `.falloutloc/cache/dotnet`:
+Either layer can explain a broken localization, so a reliable diagnosis needs both.
 
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' build '.\FaLoudit.slnx' -c Release
-& '.\.falloutloc\cache\dotnet\dotnet.exe' test '.\FaLoudit.slnx' -c Release
-```
+## Using another AI assistant
 
-## Windows package
+Codex is the packaged example, not a hard dependency. Another local agent can use FaLoudit when it can:
 
-Create the self-contained Windows x64 package:
+- run PowerShell commands and local executables;
+- read project instructions such as the bundled `AGENTS.md`;
+- parse `--json` output without treating mod text as instructions;
+- keep the game, MO2, mods, profiles, and archives read-only.
 
-```powershell
-& '.\scripts\Publish-Windows.ps1'
-```
+Download the regular `faloudit-<version>-win-x64.zip`, keep `faloudit.exe` beside `e_sqlite3.dll`, and give the assistant the `AGENTS.md` from the Codex project archive. Tell it to start with `analyze <text> --json`, inspect `contentFallback` when localization fields miss, and use lower-level `explain` or `trace` only when needed.
 
-Outputs:
+If an assistant cannot execute local programs, run FaLoudit yourself and paste its JSON result into that assistant. See the [direct CLI guide](docs/CLI_GUIDE.md).
 
-```text
-.falloutloc/cache/publish/win-x64/faloudit.exe
-.falloutloc/cache/publish/win-x64/e_sqlite3.dll
-.falloutloc/cache/packages/faloudit-0.4.0-win-x64.zip
-.falloutloc/cache/packages/faloudit-codex-project-0.4.0.zip
-.falloutloc/reports/faloudit-win-x64.sha256
-```
+## What it can diagnose
 
-After extracting the ZIP, run `faloudit.exe` from PowerShell or a terminal. The package includes the .NET runtime; only `faloudit.exe` and its adjacent `e_sqlite3.dll` are required. Keep both files together. Configure a workspace explicitly when the current directory should not own `.falloutloc`:
+- target-language text replaced by source-language text in a later override;
+- untranslated or empty winning fields;
+- physical MO2 file conflicts and plugin record conflicts;
+- ambiguous Cyrillic/Windows code-page decoding evidence;
+- matching text in saved top-level or nested script source;
+- bulk regression and untranslated-review candidates;
+- before/after diagnostic snapshots and reports.
 
-```powershell
-& '.\faloudit.exe' configure 'C:\Modding\My TTW Instance' `
-  --profile 'Default' --source-language 'en' --target-language 'ru' `
-  --workspace 'D:\FaLouditWorkspace\.falloutloc'
-```
+Supported games: **Fallout 3**, **Fallout: New Vegas**, and **TTW** running on the New Vegas engine. Fallout 4 is outside the current scope.
 
-For a ready-to-open Codex project, extract `faloudit-codex-project-0.4.0.zip`. It already contains the root `AGENTS.md`, a first-prompt template, instructions, and the packaged utility under `tools/faloudit`.
+Supported language profiles: `en`, `de`, `fr`, `es`, `it`, `pt`, `pl`, `cs`, `sk`, `hu`, `tr`, `ru`, `uk`, `be`, and `bg`. Source and target languages are selected explicitly for each workspace.
 
-## Commands
+## Safety and limits
 
-Read-only discovery; this command writes nothing:
+The configured game, MO2 instance, active profile, mods, `Data`, `overwrite`, plugins, and archives are treated as **read-only sources**. FaLoudit writes its configuration, index, cache, logs, and reports only under the selected `.falloutloc` workspace. Keep that workspace outside every source directory.
 
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  discover 'C:\Modding\My TTW Instance' --json
-```
+The index stores localized fields and saved script source; it does not decompile every compiled script bytecode path. A static script match proves that text exists, not that the code executed at runtime. Hardcoded executable strings and unsupported or compiled-only content may require the read-only manual fallback. FaLoudit reports these limitations instead of guessing.
 
-Save the selected installation and profile into the project workspace:
+## Documentation
 
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  configure 'C:\Modding\My TTW Instance' --profile 'Default' `
-  --source-language 'en' --target-language 'ru' --json
-```
+| Need | English | Русский |
+|---|---|---|
+| Run the EXE directly | [CLI guide](docs/CLI_GUIDE.md) | [Инструкция CLI](docs/CLI_GUIDE_RU.md) |
+| Maintain or recover the index | [Index operations](OPERATIONS.md) | — |
+| See extracted fields and limitations | [Coverage catalog](COVERAGE_CATALOG.md) | — |
+| Integrate machine-readable output | [JSON contract v2](JSON_CONTRACT_V2.md) | — |
+| Understand multilingual behavior | [Multilingual design](docs/MULTILINGUAL_DESIGN_0.4.md) | — |
+| Build from source | [Corresponding source](SOURCE.md) | — |
+| Follow project changes | [Changelog](CHANGELOG.md) | — |
 
-The language pair is mandatory. Supported target profiles currently include `ru`, `uk`, `be`, `bg`, `pl`, `cs`, `sk`, `hu`, `de`, `fr`, `es`, `it`, `pt`, and `tr`; regional tags such as `pt-BR` normalize to their supported primary tag.
-
-Validate configuration, language pair, profile consistency, safety guard, every active physical plugin winner, and Mutagen loading:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  doctor --json
-```
-
-Build or atomically rebuild the local index from the configured read-only profile:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  index
-```
-
-Check freshness without parsing plugins, rebuild while reusing unchanged plugin data, or force a complete backend reparse:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  index --status
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  index --rebuild
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  index --reparse
-```
-
-Inspect extraction coverage, record-type statistics, field categories, and bounded samples of unsupported records:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  coverage --issues 100 --json
-```
-
-`coverage` exits with code 2 when the snapshot has failed, partially parsed, or unverified content, while still returning a usable report. Older index schemas require one normal rebuild to schema 5; publication remains atomic.
-
-Search indexed localized text, resolve an EditorID or FormID/FormKey, and inspect a complete active override chain:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  find 'Самовыстреливающий дробовик' --ignore-case --winner-only --limit 10
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  edid 'JIPCCCNoNVSE' --json
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  form '0CE224:FalloutNV.esm' --json
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  trace '00CEE9:LonesomeRoad.esm'
-```
-
-`find` defaults to case-sensitive substring matching. Select one of `--exact`, `--contains`, or `--regex`; add `--ignore-case`, `--plugin`, `--type`, `--category`, or `--winner-only` as needed. When `nextCursor` is returned, pass it back with `--cursor`; cursors are bound to the original query and filters.
-
-
-Search saved top-level and nested script source separately from localization fields:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  content 'Bottle Water (Dirty)' --ignore-case --winner-only --limit 10 --json
-```
-
-A content hit proves static presence only. Returned context is bounded, marked as untrusted mod data, and requires semantic review before it can be described as a likely runtime source.
-
-Explain where a translation was lost, list regressions, or produce conservative untranslated-review candidates:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  analyze 'New Vegas Medical Clinic' --max-candidates 5 --json
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  explain '0CE224:FalloutNV.esm'
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  regressions 'Better Brotherhood.esm' --limit 100
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  untranslated --limit 100
-```
-
-`analyze` is the preferred entry point for a visible problem string. It refuses to diagnose a missing or stale index, ranks exact and partial localization matches, and returns a complete record diagnosis. On `noMatches` it automatically searches indexed script content and emits structured GPT-review evidence. If that also misses, `manualFallbackRecommended` preserves read-only manual investigation of compiled scripts, loose files, archives, and executable strings.
-
-Bulk commands accept `--plugin`, `--mod`, `--type`, `--category`, `--confidence high|medium|low|any`, `--exclude-file`, `--limit`, and `--cursor`. The exclusion file is UTF-8, one exact intentional source-language value per line; blank lines and `#` comments are ignored.
-
-Export an atomic Markdown, JSON, CSV, or HTML report into `.falloutloc/reports`:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  report regressions 'Better Brotherhood.esm' --limit 1000 --format markdown
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  report untranslated --limit 1000 --format json
-```
-
-Save named diagnostic snapshots and compare them after changing the build:
-
-```powershell
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  report regressions --limit 10000 --format html --snapshot before-update
-
-# Update/reindex the external build, then capture the same filters and limit.
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  report regressions --limit 10000 --format html --snapshot after-update
-
-& '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  compare before-update after-update --format html
-```
-
-Snapshots are written only under `.falloutloc/reports/snapshots`. A truncated snapshot is explicitly marked and produces an incomplete-comparison warning. `compare` exits with code 2 when new problems are present, while still returning a usable report.
-
-Use `--workspace <path>` to override the default `<current-directory>/.falloutloc` workspace. It must not overlap any source root.
-
-## Reference production validation
-
-FaLoudit 0.3 was validated against a private TTW profile with:
-
-- 252 active plugins;
-- all 252 physical plugin winners resolved;
-- `plugins.txt` and `loadorder.txt` match exactly.
-- index schema 4 / indexer 6 / field catalog 1: 0 failed plugins, 11,895 Script coverage gaps across 190 partially parsed plugins;
-- 2,516,997 records, 2,529,586 localized string fields, and 52,640 saved top-level/nested script sources in the production index;
-- measured script-fallback `analyze`: 1.14–1.22 s after warm-up; full schema-4 rebuild: 46.3 s; SQLite `quick_check`: `ok`.
-
-Local production reports are intentionally excluded from source control because
-they describe the user's private MO2 profile. The reproducible behavior and
-limitations are documented in `COVERAGE_CATALOG.md`, `JSON_CONTRACT_V1.md`, and
-the automated tests.
+For development, also see [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the full [technical specification](FALOUDIT_SPEC.md).
 
 ## License
 
-Copyright (C) 2026 YAMium.
+Copyright © 2026 YAMium.
 
-FaLoudit is free software licensed under GNU GPL version 3 only. See `LICENSE`,
-`THIRD-PARTY-NOTICES.md`, and `SOURCE.md`.
+FaLoudit is free software licensed under [GNU GPL version 3 only](LICENSE). Third-party notices are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-FaLoudit is an unofficial community project and is not affiliated with or
-endorsed by Bethesda Softworks, ZeniMax Media, Obsidian Entertainment, or the
-Mod Organizer 2 team. Fallout and related trademarks belong to their respective
-owners.
+FaLoudit is an unofficial community project and is not affiliated with or endorsed by Bethesda Softworks, ZeniMax Media, Obsidian Entertainment, or the Mod Organizer 2 team. Fallout and related trademarks belong to their respective owners.
