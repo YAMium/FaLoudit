@@ -41,6 +41,59 @@ public sealed class LocalizationDiagnosticServiceTests
     }
 
     [Fact]
+    public void DetectsExplicitPolishTargetRegression()
+    {
+        var query = new FakeIndexQuery(
+            [Override("Base.esm", 0, Field("Name", "Combat armor", TextLanguageKind.Source)),
+             Override("Polish.esp", 1, Field("Name", "Pancerz żołnierza", TextLanguageKind.Target)),
+             Override("Patch.esp", 2, Field("Name", "Combat armor", TextLanguageKind.Source))],
+            [FormKey],
+            sourceLanguage: "en",
+            targetLanguage: "pl");
+
+        var field = Assert.Single(new LocalizationDiagnosticService(query).Explain(FormKey).Fields);
+
+        Assert.Equal(LocalizationDiagnosticStatus.TranslationRegression, field.Status);
+        Assert.Equal(DiagnosticConfidence.High, field.Confidence);
+        Assert.Equal("Polish.esp", field.EarlierTarget?.PluginName);
+    }
+
+    [Fact]
+    public void ExactSourceReversionFindsSharedLatinTargetConservatively()
+    {
+        var query = new FakeIndexQuery(
+            [Override("Base.esm", 0, Field("Name", "Armor", TextLanguageKind.Source)),
+             Override("Polish.esp", 1, Field("Name", "Pancerz", TextLanguageKind.Source)),
+             Override("Patch.esp", 2, Field("Name", "Armor", TextLanguageKind.Source))],
+            [FormKey],
+            sourceLanguage: "en",
+            targetLanguage: "pl");
+
+        var field = Assert.Single(new LocalizationDiagnosticService(query).Explain(FormKey).Fields);
+
+        Assert.Equal(LocalizationDiagnosticStatus.TranslationRegression, field.Status);
+        Assert.Equal(DiagnosticConfidence.Medium, field.Confidence);
+        Assert.Equal("Polish.esp", field.EarlierTarget?.PluginName);
+    }
+
+    [Fact]
+    public void ExactSourceReversionDoesNotTreatEmptyIntermediateValueAsTranslation()
+    {
+        var query = new FakeIndexQuery(
+            [Override("Base.esm", 0, Field("Name", "Armor", TextLanguageKind.Source)),
+             Override("Empty.esp", 1, Field("Name", "", TextLanguageKind.Empty)),
+             Override("Patch.esp", 2, Field("Name", "Armor", TextLanguageKind.Source))],
+            [FormKey],
+            sourceLanguage: "en",
+            targetLanguage: "pl");
+
+        var field = Assert.Single(new LocalizationDiagnosticService(query).Explain(FormKey).Fields);
+
+        Assert.Equal(LocalizationDiagnosticStatus.SourceWithoutActiveTarget, field.Status);
+        Assert.Null(field.EarlierTarget);
+    }
+
+    [Fact]
     public void MarksChangedOrdinalListAsAmbiguousInsteadOfRegression()
     {
         var service = Service(
@@ -334,7 +387,9 @@ public sealed class LocalizationDiagnosticServiceTests
     private sealed class FakeIndexQuery(
         IReadOnlyList<IndexedOverride> chain,
         IReadOnlyList<string> candidates,
-        IReadOnlyList<IndexedStringMatch>? searchMatches = null) : IIndexQuery
+        IReadOnlyList<IndexedStringMatch>? searchMatches = null,
+        string sourceLanguage = "en",
+        string targetLanguage = "ru") : IIndexQuery
     {
         public string? RequestedPlugin { get; private set; }
 
@@ -427,6 +482,8 @@ public sealed class LocalizationDiagnosticServiceTests
             Mode = GameMode.TaleOfTwoWastelands,
             ProfileName = "Test",
             LoadOrderFingerprint = "ABC",
+            SourceLanguage = sourceLanguage,
+            TargetLanguage = targetLanguage,
             BackendName = "Fake",
             ParsedPlugins = chain.Count,
             FailedPlugins = 0,

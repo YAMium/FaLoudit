@@ -54,7 +54,49 @@ public sealed class SqliteIndexTests
         var status = repository.GetStatus();
         Assert.Equal(2, status.ParsedPlugins);
         Assert.Equal(0, status.FailedPlugins);
+        Assert.Equal("en", status.SourceLanguage);
+        Assert.Equal("ru", status.TargetLanguage);
         Assert.Equal("ok", repository.CheckIntegrity());
+    }
+
+    [Fact]
+    public void RegressionCandidatesIncludeExactSourceReversionAcrossSharedLatinScript()
+    {
+        using var area = new TestArea();
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["base.esm"] = [Record("000123:Base.esm", "Base", "Armor")],
+            ["polish.esp"] = [Record("000123:Base.esm", "Polish", "Pancerz")],
+            ["patch.esp"] = [Record("000123:Base.esm", "Patch", "Armor")],
+        };
+        CreateBuilder(area, new FakeBackend(records)).Build(
+            Request(area, "base.esm", "polish.esp", "patch.esp") with
+            {
+                SourceLanguage = "en",
+                TargetLanguage = "pl",
+            });
+
+        var candidates = new SqliteIndexRepository(area.Database)
+            .FindRegressionCandidateFormKeys(null, 10);
+
+        Assert.Equal(["000123:Base.esm"], candidates);
+    }
+
+    [Fact]
+    public void RegressionCandidatesDoNotInferAnEmptyIntermediateTranslation()
+    {
+        using var area = new TestArea();
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["base.esm"] = [Record("000123:Base.esm", "Base", "Armor")],
+            ["empty.esp"] = [Record("000123:Base.esm", "Empty", "")],
+            ["patch.esp"] = [Record("000123:Base.esm", "Patch", "Armor")],
+        };
+        CreateBuilder(area, new FakeBackend(records)).Build(
+            Request(area, "base.esm", "empty.esp", "patch.esp"));
+
+        Assert.Empty(new SqliteIndexRepository(area.Database)
+            .FindRegressionCandidateFormKeys(null, 10));
     }
 
     [Fact]
@@ -178,7 +220,7 @@ public sealed class SqliteIndexTests
         };
 
         var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
-        Assert.Equal(4, result.SchemaVersion);
+        Assert.Equal(5, result.SchemaVersion);
         Assert.Equal(1, result.Contents);
         Assert.Empty(new SqliteIndexRepository(area.Database).Find("Welcome"));
 
@@ -359,7 +401,7 @@ public sealed class SqliteIndexTests
         var status = repository.GetStatus();
         var coverage = repository.GetCoverage();
 
-        Assert.Equal(4, result.SchemaVersion);
+        Assert.Equal(5, result.SchemaVersion);
         Assert.Equal(1, result.PartiallyParsedPlugins);
         Assert.Equal(2, result.CoverageGapRecords);
         Assert.Equal(1, status.PartiallyParsedPlugins);
@@ -513,7 +555,7 @@ public sealed class SqliteIndexTests
         Assert.Equal(0, result.ReusedPlugins);
         Assert.Equal(1, result.ParsedPlugins);
         Assert.Equal(1, migrationBackend.OpenCount);
-        Assert.Equal(4, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
+        Assert.Equal(5, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
     }
 
     [Fact]
@@ -594,6 +636,8 @@ public sealed class SqliteIndexTests
             Mo2Root = area.Source,
             ProfileName = "Test",
             LoadOrderFingerprint = "ABC",
+            SourceLanguage = "en",
+            TargetLanguage = "ru",
             Plugins = plugins,
             PhysicalProviders = [],
         };
@@ -620,12 +664,16 @@ public sealed class SqliteIndexTests
                 SemanticPath = "Name",
                 Category = category,
                 Text = text,
-                Language = text.Any(character => character is >= '\u0400' and <= '\u04FF')
-                    ? TextLanguageKind.Russian
-                    : TextLanguageKind.English,
-                EncodingEvidence = text.Any(character => character is >= '\u0400' and <= '\u04FF')
-                    ? StringEncodingEvidence.UnicodeCyrillic
-                    : StringEncodingEvidence.Ascii,
+                Language = text.Length == 0
+                    ? TextLanguageKind.Empty
+                    : text.Any(character => character is >= '\u0400' and <= '\u04FF')
+                        ? TextLanguageKind.Target
+                        : TextLanguageKind.Source,
+                EncodingEvidence = text.Length == 0
+                    ? StringEncodingEvidence.None
+                    : text.Any(character => character is >= '\u0400' and <= '\u04FF')
+                        ? StringEncodingEvidence.UnicodeTarget
+                        : StringEncodingEvidence.Ascii,
                 Ambiguous = false,
             },
         ],

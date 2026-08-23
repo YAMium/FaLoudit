@@ -7,11 +7,11 @@
 
 Read-only diagnostic CLI for Fallout 3, Fallout: New Vegas, and Tale of Two Wastelands localization conflicts.
 
-The public command and executable are `faloudit` / `faloudit.exe`. The existing `.falloutloc` workspace, `falloutloc.sqlite` database, fingerprint prefix, and internal `FalloutLoc.*` assemblies intentionally retain their v0.1 names so existing configuration, indexes, and caches remain compatible.
+The public command and executable are `faloudit` / `faloudit.exe`. The existing `.falloutloc` workspace, `falloutloc.sqlite` database, fingerprint prefix, and internal `FalloutLoc.*` assemblies intentionally retain their v0.1 names. Store formats remain versioned: 0.4 requires explicit configuration migration and an atomic index rebuild.
 
 The tool is being built to answer:
 
-> Why is this exact text visible, which physical MO2 file and plugin record override won, and where was the Russian translation lost?
+> Why is this exact text visible, which physical MO2 file and plugin record override won, and where was the configured target-language translation lost?
 
 ## Current production milestone
 
@@ -30,7 +30,8 @@ Implemented:
 - JSON output and automated safety/MO2 tests;
 - backend-neutral plugin, record, string, and override DTOs;
 - exact Mutagen `0.54.4` lock in read-only overlay mode;
-- strict CP1252 byte recovery with CP1251/UTF-8/ambiguity evidence;
+- explicit `sourceLanguage` / `targetLanguage` configuration with Windows-1250, 1251, 1252, and 1254 target profiles;
+- strict CP1252 byte recovery with configured target-code-page/UTF-8/ambiguity evidence;
 - semantic extraction for names, dialogue, quests, terminals, messages, notes, perks, factions, body parts, map markers, radio locations, and regions;
 - separate content extraction for top-level SCPT source and nested INFO begin/end, quest-stage, terminal-menu, package-event, perk-effect, and patrol result scripts;
 - backend-neutral override tracing and xEdit-oracle integration tests;
@@ -42,8 +43,8 @@ Implemented:
 - high-level `analyze` command with freshness enforcement, deterministic candidate ranking, ambiguity reporting, full override diagnosis, physical plugin winner, and MO2 source mapping in one call;
 - automatic `analyze` fallback from localization fields to content candidates, structured semantic-GPT review, and an explicit manual-search recommendation when both indexes miss;
 - stable additive JSON schema v1 with application/command versions, canonical profile context, index state, warnings, confidence, pagination, typed error codes, and documented exit codes;
-- index schema v4 with a separate record-content table and record-level `parsed` / `partiallyParsed` / `notApplicable` / `unverified` coverage, plugin-level partial status, a machine-readable extraction catalog, report-query indexes, and `coverage` diagnostics;
-- `explain` diagnostics for one FormKey with field-by-field history, RU-to-EN regression status, confidence, encoding evidence, and both winner levels;
+- index schema v5 with language-pair snapshot metadata, generic source/target roles, a separate record-content table and record-level `parsed` / `partiallyParsed` / `notApplicable` / `unverified` coverage;
+- `explain` diagnostics for one FormKey with field-by-field history, target-to-source regression status, confidence, encoding evidence, and both winner levels;
 - `regressions` and `untranslated` bulk review with plugin/mod/type/category filters, query-bound cursor pagination, confidence thresholds, exact-text exclusions, and diagnostic deduplication;
 - conservative `untranslated` review candidates with technical asset-path filtering and an explicit low-confidence caveat;
 - structural-change protection for ordinal TERM, MESG, and quest-log lists.
@@ -58,7 +59,7 @@ Implemented:
 - one-pass active-plugin provider mapping, keeping real-profile `analyze` startup near one second;
 - `index --status` database size/age/backend/history output and SQLite `quick_check` corruption diagnostics.
 
-Version 0.3 is production-ready for indexed ESM/ESP script-source investigation. See [ROADMAP_0.3.md](ROADMAP_0.3.md) for completed and future content sources. The machine-readable CLI contract is documented in [JSON_CONTRACT_V1.md](JSON_CONTRACT_V1.md), and index maintenance in [OPERATIONS.md](OPERATIONS.md).
+Version 0.4 adds multilingual localization pairs while retaining the read-only v0.3 investigation pipeline. See [docs/MULTILINGUAL_DESIGN_0.4.md](docs/MULTILINGUAL_DESIGN_0.4.md) for migration and detection rules. The machine-readable CLI contract is documented in [JSON_CONTRACT_V2.md](JSON_CONTRACT_V2.md), and index maintenance in [OPERATIONS.md](OPERATIONS.md).
 
 The supported localization fields and explicit extraction limitations are documented in [COVERAGE_CATALOG.md](COVERAGE_CATALOG.md).
 
@@ -100,8 +101,8 @@ Outputs:
 ```text
 .falloutloc/cache/publish/win-x64/faloudit.exe
 .falloutloc/cache/publish/win-x64/e_sqlite3.dll
-.falloutloc/cache/packages/faloudit-0.3.2-win-x64.zip
-.falloutloc/cache/packages/faloudit-codex-project-0.3.2.zip
+.falloutloc/cache/packages/faloudit-0.4.0-win-x64.zip
+.falloutloc/cache/packages/faloudit-codex-project-0.4.0.zip
 .falloutloc/reports/faloudit-win-x64.sha256
 ```
 
@@ -109,10 +110,11 @@ After extracting the ZIP, run `faloudit.exe` from PowerShell or a terminal. The 
 
 ```powershell
 & '.\faloudit.exe' configure 'C:\Modding\My TTW Instance' `
-  --profile 'Default' --workspace 'D:\FaLouditWorkspace\.falloutloc'
+  --profile 'Default' --source-language 'en' --target-language 'ru' `
+  --workspace 'D:\FaLouditWorkspace\.falloutloc'
 ```
 
-For a ready-to-open Codex project, extract `faloudit-codex-project-0.3.2.zip`. It already contains the root `AGENTS.md`, a first-prompt template, instructions, and the packaged utility under `tools/faloudit`.
+For a ready-to-open Codex project, extract `faloudit-codex-project-0.4.0.zip`. It already contains the root `AGENTS.md`, a first-prompt template, instructions, and the packaged utility under `tools/faloudit`.
 
 ## Commands
 
@@ -127,10 +129,13 @@ Save the selected installation and profile into the project workspace:
 
 ```powershell
 & '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
-  configure 'C:\Modding\My TTW Instance' --profile 'Default' --json
+  configure 'C:\Modding\My TTW Instance' --profile 'Default' `
+  --source-language 'en' --target-language 'ru' --json
 ```
 
-Validate configuration, profile consistency, safety guard, every active physical plugin winner, Mutagen loading, and known CP1251 recovery:
+The language pair is mandatory. Supported target profiles currently include `ru`, `uk`, `be`, `bg`, `pl`, `cs`, `sk`, `hu`, `de`, `fr`, `es`, `it`, `pt`, and `tr`; regional tags such as `pt-BR` normalize to their supported primary tag.
+
+Validate configuration, language pair, profile consistency, safety guard, every active physical plugin winner, and Mutagen loading:
 
 ```powershell
 & '.\.falloutloc\cache\dotnet\dotnet.exe' run --project '.\src\FalloutLoc.Cli' -c Release -- `
@@ -164,7 +169,7 @@ Inspect extraction coverage, record-type statistics, field categories, and bound
   coverage --issues 100 --json
 ```
 
-`coverage` exits with code 2 when the snapshot has failed, partially parsed, or unverified content, while still returning a usable report. Older index schemas require one normal rebuild to schema 4; publication remains atomic.
+`coverage` exits with code 2 when the snapshot has failed, partially parsed, or unverified content, while still returning a usable report. Older index schemas require one normal rebuild to schema 5; publication remains atomic.
 
 Search indexed localized text, resolve an EditorID or FormID/FormKey, and inspect a complete active override chain:
 
@@ -212,7 +217,7 @@ Explain where a translation was lost, list regressions, or produce conservative 
 
 `analyze` is the preferred entry point for a visible problem string. It refuses to diagnose a missing or stale index, ranks exact and partial localization matches, and returns a complete record diagnosis. On `noMatches` it automatically searches indexed script content and emits structured GPT-review evidence. If that also misses, `manualFallbackRecommended` preserves read-only manual investigation of compiled scripts, loose files, archives, and executable strings.
 
-Bulk commands accept `--plugin`, `--mod`, `--type`, `--category`, `--confidence high|medium|low|any`, `--exclude-file`, `--limit`, and `--cursor`. The exclusion file is UTF-8, one exact intentional-English value per line; blank lines and `#` comments are ignored.
+Bulk commands accept `--plugin`, `--mod`, `--type`, `--category`, `--confidence high|medium|low|any`, `--exclude-file`, `--limit`, and `--cursor`. The exclusion file is UTF-8, one exact intentional source-language value per line; blank lines and `#` comments are ignored.
 
 Export an atomic Markdown, JSON, CSV, or HTML report into `.falloutloc/reports`:
 

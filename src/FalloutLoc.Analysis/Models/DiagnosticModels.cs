@@ -1,20 +1,25 @@
 using FalloutLoc.Backends.Models;
 using FalloutLoc.Index.Models;
+using System.Text.Json.Serialization;
 
 namespace FalloutLoc.Analysis.Models;
 
 public enum LocalizationDiagnosticStatus
 {
     NoRecord,
-    LocalizedRussian,
+    LocalizedTarget,
     TranslationRegression,
     ClearedTranslation,
-    NonRussianRegression,
-    EnglishWithoutActiveRussian,
+    NonTargetRegression,
+    SourceWithoutActiveTarget,
     EmptyWinner,
     DeletedWinner,
     Neutral,
     Ambiguous,
+
+    LocalizedRussian = LocalizedTarget,
+    NonRussianRegression = NonTargetRegression,
+    EnglishWithoutActiveRussian = SourceWithoutActiveTarget,
 }
 
 public enum DiagnosticConfidence
@@ -46,7 +51,9 @@ public sealed record FieldDiagnostic
     public required string Category { get; init; }
     public required LocalizationDiagnosticStatus Status { get; init; }
     public required DiagnosticConfidence Confidence { get; init; }
-    public DiagnosticStringOccurrence? EarlierRussian { get; init; }
+    public DiagnosticStringOccurrence? EarlierTarget { get; init; }
+    [JsonIgnore]
+    public DiagnosticStringOccurrence? EarlierRussian => EarlierTarget;
     public required DiagnosticStringOccurrence Winner { get; init; }
     public required bool StructuralChange { get; init; }
     public required string Explanation { get; init; }
@@ -70,6 +77,8 @@ public sealed record RecordDiagnostic
 
 public sealed record RegressionReport
 {
+    public string SourceLanguage { get; init; } = "source";
+    public string TargetLanguage { get; init; } = "target";
     public string? WinningPluginFilter { get; init; }
     public string? SourceModFilter { get; init; }
     public string? RecordTypeFilter { get; init; }
@@ -87,6 +96,8 @@ public sealed record RegressionReport
 
 public sealed record UntranslatedReport
 {
+    public string SourceLanguage { get; init; } = "source";
+    public string TargetLanguage { get; init; } = "target";
     public string? WinningPluginFilter { get; init; }
     public string? SourceModFilter { get; init; }
     public string? RecordTypeFilter { get; init; }

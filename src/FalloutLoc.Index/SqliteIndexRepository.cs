@@ -530,8 +530,29 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
               JOIN strings winning_string
                 ON winning_string.record_id = winner.id
                AND winning_string.semantic_path = earlier_string.semantic_path
-              WHERE earlier_string.language = 'Russian'
-                AND winning_string.language IN ('English', 'Empty', 'Other')
+              WHERE (
+                    earlier_string.language = 'Target'
+                    OR (
+                        winning_string.language = 'Source'
+                        AND earlier_string.text IS NOT NULL
+                        AND TRIM(earlier_string.text) <> ''
+                        AND earlier_string.text <> winning_string.text
+                        AND EXISTS (
+                            SELECT 1
+                            FROM records source_record
+                            JOIN plugins source_plugin ON source_plugin.id = source_record.plugin_id
+                            JOIN strings source_string
+                              ON source_string.record_id = source_record.id
+                             AND source_string.semantic_path = winning_string.semantic_path
+                            WHERE source_record.snapshot_id = winner.snapshot_id
+                              AND source_record.form_key = winner.form_key COLLATE NOCASE
+                              AND source_plugin.load_order_index < earlier_plugin.load_order_index
+                              AND source_string.language = 'Source'
+                              AND source_string.text = winning_string.text
+                        )
+                    )
+                )
+                AND winning_string.language IN ('Source', 'Empty', 'Other')
                 AND earlier_plugin.load_order_index < winning_plugin.load_order_index
                 AND winning_plugin.parse_status IN ('parsed', 'partiallyParsed')
                 AND ($plugin IS NULL OR winning_plugin.name = $plugin COLLATE NOCASE)
@@ -555,7 +576,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
               JOIN plugins winning_plugin ON winning_plugin.id = winner.plugin_id
               JOIN strings winning_string ON winning_string.record_id = winner.id
               WHERE winning_plugin.parse_status IN ('parsed', 'partiallyParsed')
-                AND winning_string.language = 'English'
+                AND winning_string.language = 'Source'
                 AND ($plugin IS NULL OR winning_plugin.name = $plugin COLLATE NOCASE)
                 AND ($mod IS NULL OR winning_plugin.source_mod = $mod COLLATE NOCASE)
                 AND ($type IS NULL OR winner.record_type = $type COLLATE NOCASE)
@@ -577,7 +598,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                     AND earlier_record.form_key = winner.form_key COLLATE NOCASE
                     AND earlier_plugin.load_order_index < winning_plugin.load_order_index
                     AND earlier_string.semantic_path = winning_string.semantic_path
-                    AND earlier_string.language = 'Russian'
+                    AND earlier_string.language = 'Target'
                 )
               ORDER BY winner.form_key COLLATE NOCASE
               LIMIT $take OFFSET $offset;
@@ -645,7 +666,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         using var connection = OpenValidated();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT s.created_utc, s.mode, s.profile_name, s.load_order_fingerprint, s.backend_name,
+            SELECT s.created_utc, s.mode, s.profile_name, s.load_order_fingerprint,
+                   s.source_language, s.target_language, s.backend_name,
                    SUM(CASE WHEN p.parse_status IN ('parsed', 'partiallyParsed') THEN 1 ELSE 0 END),
                    SUM(CASE WHEN p.parse_status = 'failed' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN p.parse_status = 'partiallyParsed' THEN 1 ELSE 0 END),
@@ -669,11 +691,13 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             Mode = Enum.Parse<FalloutLoc.Core.Configuration.GameMode>(reader.GetString(1)),
             ProfileName = reader.GetString(2),
             LoadOrderFingerprint = reader.GetString(3),
-            BackendName = reader.GetString(4),
-            ParsedPlugins = reader.GetInt32(5),
-            FailedPlugins = reader.GetInt32(6),
-            PartiallyParsedPlugins = reader.GetInt32(7),
-            CoverageGapRecords = reader.GetInt64(8),
+            SourceLanguage = reader.GetString(4),
+            TargetLanguage = reader.GetString(5),
+            BackendName = reader.GetString(6),
+            ParsedPlugins = reader.GetInt32(7),
+            FailedPlugins = reader.GetInt32(8),
+            PartiallyParsedPlugins = reader.GetInt32(9),
+            CoverageGapRecords = reader.GetInt64(10),
         };
         return _statusCache;
     }
@@ -709,6 +733,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             Mode = status.Mode,
             ProfileName = status.ProfileName,
             LoadOrderFingerprint = status.LoadOrderFingerprint,
+            SourceLanguage = status.SourceLanguage,
+            TargetLanguage = status.TargetLanguage,
             TotalPlugins = status.ParsedPlugins + status.FailedPlugins,
             ParsedPlugins = status.ParsedPlugins - status.PartiallyParsedPlugins,
             PartiallyParsedPlugins = status.PartiallyParsedPlugins,
@@ -779,8 +805,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         command.CommandText = """
             SELECT category, COUNT(*),
                    SUM(CASE WHEN text IS NOT NULL AND text != '' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN language = 'Russian' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN language = 'English' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN language = 'Target' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN language = 'Source' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN ambiguous = 1 THEN 1 ELSE 0 END)
             FROM strings
             GROUP BY category
@@ -795,8 +821,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 Category = reader.GetString(0),
                 Fields = reader.GetInt64(1),
                 NonEmptyFields = reader.GetInt64(2),
-                RussianFields = reader.GetInt64(3),
-                EnglishFields = reader.GetInt64(4),
+                TargetFields = reader.GetInt64(3),
+                SourceFields = reader.GetInt64(4),
                 AmbiguousFields = reader.GetInt64(5),
             });
         }

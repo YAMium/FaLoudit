@@ -13,7 +13,7 @@ public sealed class ProgramTests
         var result = Invoke("--version");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Equal("0.3.2", result.Output.Trim());
+        Assert.Equal("0.4.0", result.Output.Trim());
     }
 
     [Fact]
@@ -23,6 +23,7 @@ public sealed class ProgramTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("faloudit index [--status | --rebuild | --reparse]", result.Output);
+        Assert.Contains("--source-language <tag> --target-language <tag>", result.Output);
         Assert.Contains("faloudit edid <editor-id>", result.Output);
         Assert.Contains("faloudit form <form-id|form-key>", result.Output);
         Assert.Contains("faloudit analyze <text>", result.Output);
@@ -45,8 +46,8 @@ public sealed class ProgramTests
 
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("0.3.2", root.GetProperty("applicationVersion").GetString());
+        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("0.4.0", root.GetProperty("applicationVersion").GetString());
         Assert.Equal("find", root.GetProperty("command").GetString());
         Assert.True(root.GetProperty("success").GetBoolean());
         Assert.Equal(0, root.GetProperty("exitCode").GetInt32());
@@ -79,6 +80,18 @@ public sealed class ProgramTests
         Assert.Equal(
             "invalidArguments",
             document.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void ConfigureRequiresExplicitLanguagePairBeforeDiscovery()
+    {
+        var result = Invoke("configure", @"C:\missing", "--json");
+
+        using var document = JsonDocument.Parse(result.Output);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("invalidArguments",
+            document.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains("--source-language", document.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     private static (int ExitCode, string Output) Invoke(params string[] args)

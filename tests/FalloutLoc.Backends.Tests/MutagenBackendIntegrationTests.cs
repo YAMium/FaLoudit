@@ -151,7 +151,7 @@ public sealed class MutagenBackendIntegrationTests
         Assert.Contains(bodyNames, field => field.Text == "Power Generator");
     }
 
-    private static MutagenPluginBackend CreateBackend() => new(new StrictPluginStringDecoder());
+    private static MutagenPluginBackend CreateBackend() => new(new StrictPluginStringDecoder("en", "ru"));
 
     private static PluginOpenRequest Request(string data, string plugin) => new()
     {

@@ -18,7 +18,7 @@ public sealed class StrictPluginStringDecoderTests
         var cp1251 = System.Text.Encoding.GetEncoding(1251);
         var cp1252 = System.Text.Encoding.GetEncoding(1252);
         var backendValue = cp1252.GetString(cp1251.GetBytes(expected));
-        var decoder = new StrictPluginStringDecoder();
+        var decoder = new StrictPluginStringDecoder("en", "ru");
 
         var actual = decoder.Decode(backendValue);
 
@@ -29,10 +29,41 @@ public sealed class StrictPluginStringDecoderTests
         Assert.NotNull(actual.RecoveredBytesSha256);
     }
 
+    [Theory]
+    [InlineData("pl", 1250, "Zażółć gęślą jaźń")]
+    [InlineData("de", 1252, "Schließen")]
+    [InlineData("fr", 1252, "Équipement amélioré")]
+    [InlineData("es", 1252, "Cañón automático")]
+    [InlineData("tr", 1254, "Gelişmiş zırh")]
+    public void RecoversConfiguredEuropeanTargetCodePage(string target, int codePage, string expected)
+    {
+        var targetEncoding = System.Text.Encoding.GetEncoding(codePage);
+        var cp1252 = System.Text.Encoding.GetEncoding(1252);
+        var backendValue = cp1252.GetString(targetEncoding.GetBytes(expected));
+
+        var actual = new StrictPluginStringDecoder("en", target).Decode(backendValue);
+
+        Assert.Equal(expected, actual.Text);
+        Assert.Equal(TextLanguageKind.Target, actual.Language);
+        Assert.Equal(StringEncodingEvidence.TargetCodePageRecovered, actual.EncodingEvidence);
+        Assert.False(actual.IsAmbiguous);
+    }
+
+    [Fact]
+    public void PreservesDirectUnicodeUkrainianTarget()
+    {
+        var actual = new StrictPluginStringDecoder("en", "uk").Decode("Поліпшена зброя");
+
+        Assert.Equal("Поліпшена зброя", actual.Text);
+        Assert.Equal(TextLanguageKind.Target, actual.Language);
+        Assert.Equal(StringEncodingEvidence.UnicodeTarget, actual.EncodingEvidence);
+        Assert.False(actual.IsAmbiguous);
+    }
+
     [Fact]
     public void PreservesAsciiWithoutClaimingAnEncoding()
     {
-        var actual = new StrictPluginStringDecoder().Decode("Tactical Helmet");
+        var actual = new StrictPluginStringDecoder("en", "ru").Decode("Tactical Helmet");
 
         Assert.Equal("Tactical Helmet", actual.Text);
         Assert.Equal(TextLanguageKind.English, actual.Language);
@@ -41,9 +72,19 @@ public sealed class StrictPluginStringDecoderTests
     }
 
     [Fact]
+    public void DoesNotTurnWesternSourceAccentIntoOneCyrillicLetter()
+    {
+        var actual = new StrictPluginStringDecoder("en", "ru").Decode("café");
+
+        Assert.Equal("café", actual.Text);
+        Assert.Equal(TextLanguageKind.Source, actual.Language);
+        Assert.NotEqual(StringEncodingEvidence.TargetCodePageRecovered, actual.EncodingEvidence);
+    }
+
+    [Fact]
     public void MarksNonCp1252UnicodeAsUnrecoverableInsteadOfReplacingIt()
     {
-        var actual = new StrictPluginStringDecoder().Decode("漢字");
+        var actual = new StrictPluginStringDecoder("en", "ru").Decode("漢字");
 
         Assert.Equal("漢字", actual.Text);
         Assert.Equal(StringEncodingEvidence.UnrecoverableUnicode, actual.EncodingEvidence);
@@ -54,13 +95,13 @@ public sealed class StrictPluginStringDecoderTests
     [Fact]
     public void AllCp1252BytesRoundTripStrictly()
     {
-        new StrictPluginStringDecoder().VerifyByteRecoveryInvariant();
+        new StrictPluginStringDecoder("en", "ru").VerifyByteRecoveryInvariant();
     }
 
     [Fact]
     public void PluginClassifierDoesNotGuessFromAsciiOrAmbiguousPunctuation()
     {
-        var decoder = new StrictPluginStringDecoder();
+        var decoder = new StrictPluginStringDecoder("en", "ru");
         var classifier = new PluginEncodingClassifier();
         var ascii = Occurrence(decoder.Decode("Only ASCII"));
         var ambiguous = Occurrence(decoder.Decode("90°"));

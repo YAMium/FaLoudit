@@ -1004,3 +1004,22 @@ Known risks: ...
 - Tale of Two Wastelands: https://taleoftwowastelands.com/
 
 Старые TTW guides могут относиться к предыдущим версиям. Реальная текущая сборка пользователя и актуальные инструменты имеют приоритет над устаревшими примерами.
+
+---
+
+# 39. Multilingual extension (version 0.4)
+
+The original English/Russian examples remain the primary TTW validation case,
+but the production model is configured explicitly with `sourceLanguage` and
+`targetLanguage` before indexing. Diagnostics use relative `Source` / `Target`
+roles and target-to-source regression terminology.
+
+Supported 0.4 profiles cover the European single-byte Fallout localization
+families Windows-1250, Windows-1251, Windows-1252, and Windows-1254. Shared
+Latin-script detection must remain conservative. An exact return to an earlier
+source value after an intervening different value is useful regression evidence;
+plain Latin text without override history is only a review candidate.
+
+Configuration schema 1 requires explicit migration. SQLite schema 4 is rebuilt
+atomically as schema 5 and is never mutated inside a source directory. See
+`docs/MULTILINGUAL_DESIGN_0.4.md` for the compatibility design.

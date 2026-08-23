@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FalloutLoc.Analysis.Models;
 
 public sealed record DiagnosticFindingSnapshot
@@ -13,12 +15,19 @@ public sealed record DiagnosticFindingSnapshot
     public required string WinningPlugin { get; init; }
     public required string WinningSourceMod { get; init; }
     public string? WinningText { get; init; }
-    public string? EarlierRussianText { get; init; }
+    public string? EarlierTargetText { get; init; }
+    [JsonPropertyName("earlierRussianText")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyEarlierRussianText { get; init; }
+    [JsonIgnore]
+    public string? EarlierRussianText => EarlierTargetText ?? LegacyEarlierRussianText;
 }
 
 public sealed record DiagnosticReportSnapshot
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
+    public string SourceLanguage { get; init; } = "source";
+    public string TargetLanguage { get; init; } = "target";
     public required string ReportKind { get; init; }
     public required DateTime CreatedUtc { get; init; }
     public required string IndexFingerprint { get; init; }

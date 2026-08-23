@@ -20,7 +20,7 @@ Read `FALOUDIT_SPEC.md` before architectural or backend changes.
 
 Answer:
 
-> Why does the user see this exact text in the current FO3/FNV/TTW setup, which physical file and record override won, and where was the Russian translation lost?
+> Why does the user see this exact text in the current FO3/FNV/TTW setup, which physical file and record override won, and where was the configured target-language translation lost?
 
 ## Absolute safety rules
 
@@ -105,8 +105,8 @@ When the user reports an untranslated string:
 5. Inspect the complete active override chain.
 6. Determine the winning override.
 7. Show relevant translated string-field changes.
-8. Determine whether a Russian value existed earlier.
-9. Detect a later English regression.
+8. Determine whether a configured target-language value existed earlier.
+9. Detect a later regression to the configured source language.
 10. Resolve the winning physical plugin file.
 11. Map it to the MO2 source mod and priority.
 12. Distinguish MO2 file-level conflicts from plugin record-level conflicts.
@@ -140,7 +140,7 @@ Both can independently cause localization failures.
 
 FO3/FNV Cyrillic decoding is a first-class correctness concern.
 
-Do not assume UTF-8. Verify how the chosen backend decodes strings and test Russian fixtures.
+Do not assume UTF-8. Verify how the chosen backend decodes strings and test fixtures for the configured target code page.
 
 ## Development order
 
@@ -154,7 +154,7 @@ Do not assume UTF-8. Verify how the chosen backend decodes strings and test Russ
 8. search;
 9. override trace;
 10. winner -> MO2 mod mapping;
-11. RU -> EN regression detection;
+11. target -> source regression detection;
 12. untranslated diagnostics;
 13. performance/error handling;
 14. packaging and polished CLI.

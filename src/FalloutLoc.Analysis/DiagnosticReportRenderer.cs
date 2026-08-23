@@ -9,14 +9,15 @@ public static class DiagnosticReportRenderer
     private static readonly string[] FindingHeaders =
     [
         "FormKey", "RecordType", "EditorID", "SemanticPath", "Category", "Status", "Confidence",
-        "WinningPlugin", "WinningSourceMod", "WinnerText", "EarlierRussianText",
+        "WinningPlugin", "WinningSourceMod", "WinnerText", "EarlierTargetText",
     ];
 
     public static string RenderRegressionMarkdown(RegressionReport report, DateTime generatedUtc)
     {
         ArgumentNullException.ThrowIfNull(report);
         var text = Header("Localization regression report", generatedUtc);
-        text.AppendLine($"Candidate records: {report.CandidateRecords}  ")
+        text.AppendLine($"Language pair: `{Inline(report.SourceLanguage)}` -> `{Inline(report.TargetLanguage)}`  ")
+            .AppendLine($"Candidate records: {report.CandidateRecords}  ")
             .AppendLine($"Affected fields: {report.Findings}  ")
             .AppendLine($"Winning plugin filter: {Inline(report.WinningPluginFilter ?? "all")}")
             .AppendLine();
@@ -29,11 +30,11 @@ public static class DiagnosticReportRenderer
         foreach (var record in report.Records)
         {
             AppendRecordHeader(text, record);
-            foreach (var field in record.Fields.Where(field => field.EarlierRussian is not null
-                         && field.Status is not LocalizationDiagnosticStatus.LocalizedRussian))
+            foreach (var field in record.Fields.Where(field => field.EarlierTarget is not null
+                         && field.Status is not LocalizationDiagnosticStatus.LocalizedTarget))
             {
                 text.AppendLine($"- `{Inline(field.SemanticPath)}` — **{field.Status}** ({field.Confidence})")
-                    .AppendLine($"  - Earlier RU: `{Inline(field.EarlierRussian!.PluginName)}` / {Inline(field.EarlierRussian.Text)}")
+                    .AppendLine($"  - Earlier target ({Inline(report.TargetLanguage)}): `{Inline(field.EarlierTarget!.PluginName)}` / {Inline(field.EarlierTarget.Text)}")
                     .AppendLine($"  - Winner: `{Inline(field.Winner.PluginName)}` / {Inline(field.Winner.Text)}")
                     .AppendLine($"  - {Inline(field.Explanation)}");
             }
@@ -48,7 +49,8 @@ public static class DiagnosticReportRenderer
     {
         ArgumentNullException.ThrowIfNull(report);
         var text = Header("Untranslated review candidates", generatedUtc);
-        text.AppendLine($"Candidate records: {report.CandidateRecords}  ")
+        text.AppendLine($"Language pair: `{Inline(report.SourceLanguage)}` -> `{Inline(report.TargetLanguage)}`  ")
+            .AppendLine($"Candidate records: {report.CandidateRecords}  ")
             .AppendLine($"Candidate fields: {report.CandidateFields}  ")
             .AppendLine($"Confidence: **{report.Confidence}**  ")
             .AppendLine($"Winning plugin filter: {Inline(report.WinningPluginFilter ?? "all")}")
@@ -77,16 +79,18 @@ public static class DiagnosticReportRenderer
     }
 
     public static string RenderRegressionCsv(RegressionReport report) =>
-        RenderCsv(Flatten(report.Records));
+        RenderCsv(Flatten(report.Records, report.SourceLanguage, report.TargetLanguage));
 
     public static string RenderUntranslatedCsv(UntranslatedReport report) =>
-        RenderCsv(Flatten(report.Records));
+        RenderCsv(Flatten(report.Records, report.SourceLanguage, report.TargetLanguage));
 
     public static string RenderRegressionHtml(RegressionReport report, DateTime generatedUtc) =>
-        RenderHtml("Localization regression report", generatedUtc, Flatten(report.Records));
+        RenderHtml("Localization regression report", generatedUtc,
+            Flatten(report.Records, report.SourceLanguage, report.TargetLanguage));
 
     public static string RenderUntranslatedHtml(UntranslatedReport report, DateTime generatedUtc) =>
-        RenderHtml("Untranslated review candidates", generatedUtc, Flatten(report.Records));
+        RenderHtml("Untranslated review candidates", generatedUtc,
+            Flatten(report.Records, report.SourceLanguage, report.TargetLanguage));
 
     public static string RenderDiffMarkdown(DiagnosticSnapshotDiff diff, DateTime generatedUtc)
     {
@@ -158,8 +162,12 @@ public static class DiagnosticReportRenderer
         .Replace("\r", " ", StringComparison.Ordinal)
         .Replace("\n", " ", StringComparison.Ordinal);
 
-    private static IReadOnlyList<DiagnosticFindingSnapshot> Flatten(IReadOnlyList<RecordDiagnostic> records) =>
-        DiagnosticSnapshotService.Create("render", "render", records, false, DateTime.UnixEpoch).Findings;
+    private static IReadOnlyList<DiagnosticFindingSnapshot> Flatten(
+        IReadOnlyList<RecordDiagnostic> records,
+        string sourceLanguage,
+        string targetLanguage) =>
+        DiagnosticSnapshotService.Create(
+            "render", "render", records, false, DateTime.UnixEpoch, sourceLanguage, targetLanguage).Findings;
 
     private static string RenderCsv(IReadOnlyList<DiagnosticFindingSnapshot> findings)
     {

@@ -20,7 +20,7 @@ namespace FalloutLoc.Cli;
 
 public static class Program
 {
-    private const int JsonSchemaVersion = 1;
+    private const int JsonSchemaVersion = 2;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -128,6 +128,9 @@ public static class Program
     {
         var root = RequirePositional(args, 1, "configure requires a MO2/build root.");
         var profile = GetOption(args, "--profile");
+        var pair = LocalizationLanguages.ValidatePair(
+            RequireOption(args, "--source-language", "configure requires --source-language <tag>."),
+            RequireOption(args, "--target-language", "configure requires --target-language <tag>."));
         var workspace = GetWorkspace(args);
         var result = Discover(root, profile, workspace);
         var sourceRoots = SourceRoots(result);
@@ -136,6 +139,8 @@ public static class Program
         var configPath = Path.Combine(workspace, "config", "project.json");
         var configuration = new ProjectConfiguration
         {
+            SourceLanguage = pair.Source,
+            TargetLanguage = pair.Target,
             Mode = result.Mode,
             Mo2Root = result.Mo2Root,
             ModsRoot = result.ModsRoot,
@@ -166,6 +171,7 @@ public static class Program
         {
             Console.WriteLine($"Configuration written: {PathRules.NormalizeAbsolute(configPath)}");
             Console.WriteLine($"Mode: {configuration.Mode}; profile: {configuration.ProfileName}");
+            Console.WriteLine($"Localization: {configuration.SourceLanguage} -> {configuration.TargetLanguage}");
         }
 
         return exitCode;
@@ -185,8 +191,19 @@ public static class Program
             .Discover(configuration.Mo2Root, configuration.ProfileName);
         var checks = new List<DoctorCheck>();
 
-        AddCheck(checks, "config-schema", configuration.SchemaVersion == 1,
+        AddCheck(checks, "config-schema", configuration.SchemaVersion == 2,
             $"Schema version: {configuration.SchemaVersion}");
+        (string Source, string Target)? configuredPair = null;
+        try
+        {
+            configuredPair = configuration.RequireLanguagePair();
+            AddCheck(checks, "localization-languages", true,
+                $"{configuredPair.Value.Source} -> {configuredPair.Value.Target}");
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            AddCheck(checks, "localization-languages", false, exception.Message);
+        }
         AddCheck(checks, "mode", configuration.Mode == result.Mode,
             $"Configured: {configuration.Mode}; discovered: {result.Mode}");
         AddCheck(checks, "profile", configuration.ProfileName.Equals(result.SelectedProfile, StringComparison.OrdinalIgnoreCase),
@@ -212,16 +229,19 @@ public static class Program
 
         var backendName = "Mutagen.Bethesda.Fallout3 0.54.4";
         StrictPluginStringDecoder? decoder = null;
-        try
+        if (configuredPair is not null)
         {
-            decoder = new StrictPluginStringDecoder();
-            decoder.VerifyByteRecoveryInvariant();
-            AddCheck(checks, "encoding-byte-recovery", true,
-                "Strict CP1252 round-trip passed for all byte values 0x00-0xFF.");
-        }
-        catch (Exception exception)
-        {
-            AddCheck(checks, "encoding-byte-recovery", false, exception.Message);
+            try
+            {
+                decoder = new StrictPluginStringDecoder(configuredPair.Value.Source, configuredPair.Value.Target);
+                decoder.VerifyByteRecoveryInvariant();
+                AddCheck(checks, "encoding-byte-recovery", true,
+                    "Strict CP1252 round-trip passed for all byte values 0x00-0xFF.");
+            }
+            catch (Exception exception)
+            {
+                AddCheck(checks, "encoding-byte-recovery", false, exception.Message);
+            }
         }
 
         if (decoder is not null)
@@ -244,13 +264,16 @@ public static class Program
                         "029438:FalloutNV.esm",
                         StringComparison.OrdinalIgnoreCase));
                 var knownName = knownRecord?.Strings.FirstOrDefault(field => field.SemanticPath == "Name");
+                var expectsRussian = configuration.TargetLanguage?.Equals("ru", StringComparison.OrdinalIgnoreCase) == true;
                 var backendPassed = knownRecord?.EditorId == "trapShotgun"
-                    && knownName?.Text == "Самовыстреливающий дробовик"
-                    && knownName.EncodingEvidence == StringEncodingEvidence.Windows1251Recovered;
-                AddCheck(checks, "mutagen-cp1251-smoke", backendPassed,
+                    && (!expectsRussian || knownName?.Text == "Самовыстреливающий дробовик"
+                        && knownName.EncodingEvidence == StringEncodingEvidence.TargetCodePageRecovered);
+                AddCheck(checks, "mutagen-language-smoke", backendPassed,
                     backendPassed
-                        ? "029438:FalloutNV.esm / trapShotgun decoded as 'Самовыстреливающий дробовик'."
-                        : "Known FalloutNV CP1251 record did not match the validated value.");
+                        ? expectsRussian
+                            ? "029438:FalloutNV.esm / trapShotgun decoded with the configured Russian target profile."
+                            : $"029438:FalloutNV.esm was read successfully with target profile '{configuration.TargetLanguage}'."
+                        : "Known FalloutNV record did not match the validated backend result.");
             }
             catch (Exception exception)
             {
@@ -317,6 +340,7 @@ public static class Program
         }
 
         var current = LoadCurrentIndexInputs(workspace);
+        var languagePair = current.Configuration.RequireLanguagePair();
 
         var request = new IndexBuildRequest
         {
@@ -325,12 +349,14 @@ public static class Program
             Mo2Root = current.Configuration.Mo2Root,
             ProfileName = current.Configuration.ProfileName,
             LoadOrderFingerprint = current.Fingerprint,
+            SourceLanguage = languagePair.Source,
+            TargetLanguage = languagePair.Target,
             Plugins = current.Plugins,
             PhysicalProviders = current.Providers,
             PreviousDatabasePath = GetIndexPath(workspace),
             ReuseUnchangedPlugins = !forceReparse,
         };
-        var builder = CreateIndexBuilder(current.Guard);
+        var builder = CreateIndexBuilder(current.Guard, languagePair.Source, languagePair.Target);
         var freshness = IndexFreshnessEvaluator.Evaluate(
             request.DestinationPath,
             request.LoadOrderFingerprint,
@@ -637,10 +663,11 @@ public static class Program
         var query = RequirePositional(args, 1, "analyze requires a visible text query.");
         var workspace = GetWorkspace(args);
         var current = LoadCurrentIndexInputs(workspace);
+        var languagePair = current.Configuration.RequireLanguagePair();
         var freshness = IndexFreshnessEvaluator.Evaluate(
             GetIndexPath(workspace),
             current.Fingerprint,
-            CreateIndexBuilder(current.Guard).CacheIdentity);
+            CreateIndexBuilder(current.Guard, languagePair.Source, languagePair.Target).CacheIdentity);
         if (!freshness.IsFresh)
         {
             if (json)
@@ -896,7 +923,9 @@ public static class Program
         }
         else
         {
+            var indexStatus = repository.GetStatus();
             Console.WriteLine($"{diagnostic.FormKey} {diagnostic.RecordType ?? "-"} {diagnostic.EditorId ?? "-"}");
+            Console.WriteLine($"Localization: {indexStatus.SourceLanguage} -> {indexStatus.TargetLanguage}");
             Console.WriteLine($"Status: {diagnostic.Status}; confidence: {diagnostic.Confidence}");
             Console.WriteLine(diagnostic.Explanation);
             if (diagnostic.WinningPlugin is not null)
@@ -908,9 +937,9 @@ public static class Program
             foreach (var field in diagnostic.Fields)
             {
                 Console.WriteLine($"  {field.SemanticPath}: {field.Status} ({field.Confidence})");
-                if (field.EarlierRussian is not null)
+                if (field.EarlierTarget is not null)
                 {
-                    Console.WriteLine($"    RU [{field.EarlierRussian.PluginName}]: {field.EarlierRussian.Text}");
+                    Console.WriteLine($"    TARGET [{field.EarlierTarget.PluginName}]: {field.EarlierTarget.Text}");
                 }
 
                 Console.WriteLine($"    WIN [{field.Winner.PluginName}]: {field.Winner.Text}");
@@ -944,6 +973,7 @@ public static class Program
         }
         else
         {
+            Console.WriteLine($"Localization: {report.SourceLanguage} -> {report.TargetLanguage}");
             Console.WriteLine($"Regression candidates: {report.CandidateRecords} records, {report.Findings} affected fields");
             if (report.IndexHasParseFailures)
             {
@@ -953,11 +983,11 @@ public static class Program
             foreach (var record in report.Records)
             {
                 Console.WriteLine($"{record.FormKey} {record.RecordType} {record.EditorId ?? "-"} <- {record.WinningPlugin}");
-                foreach (var field in record.Fields.Where(field => field.EarlierRussian is not null
-                             && field.Status is not LocalizationDiagnosticStatus.LocalizedRussian))
+                foreach (var field in record.Fields.Where(field => field.EarlierTarget is not null
+                             && field.Status is not LocalizationDiagnosticStatus.LocalizedTarget))
                 {
                     Console.WriteLine($"  {field.SemanticPath}: {field.Status} ({field.Confidence})");
-                    Console.WriteLine($"    RU [{field.EarlierRussian!.PluginName}]: {field.EarlierRussian.Text}");
+                    Console.WriteLine($"    TARGET [{field.EarlierTarget!.PluginName}]: {field.EarlierTarget.Text}");
                     Console.WriteLine($"    WIN: {field.Winner.Text}");
                 }
             }
@@ -981,6 +1011,7 @@ public static class Program
         }
         else
         {
+            Console.WriteLine($"Localization: {report.SourceLanguage} -> {report.TargetLanguage}");
             Console.WriteLine($"Untranslated review candidates: {report.CandidateRecords} records, {report.CandidateFields} fields");
             Console.WriteLine($"Confidence: {report.Confidence}. {report.Caveat}");
             if (report.IndexHasParseFailures)
@@ -1066,8 +1097,10 @@ public static class Program
         if (GetOption(args, "--snapshot") is { } snapshotName)
         {
             snapshotPath = Path.Combine(workspace, "reports", "snapshots", SafeFileName(snapshotName) + ".json");
+            var indexStatus = repository.GetStatus();
             var snapshot = DiagnosticSnapshotService.Create(
-                reportKind, repository.GetStatus().LoadOrderFingerprint, reportRecords, truncated, generatedUtc);
+                reportKind, indexStatus.LoadOrderFingerprint, reportRecords, truncated, generatedUtc,
+                indexStatus.SourceLanguage, indexStatus.TargetLanguage);
             reportFileSystem.WriteAllTextAtomic(
                 snapshotPath,
                 JsonSerializer.Serialize(snapshot, JsonOptions) + Environment.NewLine);
@@ -1211,6 +1244,9 @@ public static class Program
 
         return null;
     }
+
+    private static string RequireOption(string[] args, string name, string message) =>
+        GetOption(args, name) ?? throw new ArgumentException(message);
 
     private static int GetIntOption(string[] args, string name, int defaultValue)
     {
@@ -1381,9 +1417,12 @@ public static class Program
 
     private static string GetIndexPath(string workspace) => Path.Combine(workspace, "index", "falloutloc.sqlite");
 
-    private static SqliteIndexBuilder CreateIndexBuilder(ReadOnlySourceGuard guard) => new(
+    private static SqliteIndexBuilder CreateIndexBuilder(
+        ReadOnlySourceGuard guard,
+        string sourceLanguage,
+        string targetLanguage) => new(
         new WorkspaceFileSystem(guard),
-        new MutagenPluginBackend(new StrictPluginStringDecoder()),
+        new MutagenPluginBackend(new StrictPluginStringDecoder(sourceLanguage, targetLanguage)),
         new PluginEncodingClassifier());
 
     private static object JsonContext(GameMode mode, string profileName) => new
@@ -1403,6 +1442,8 @@ public static class Program
         freshness = "notChecked",
         freshnessVerified = false,
         indexedFingerprint = status.LoadOrderFingerprint,
+        status.SourceLanguage,
+        status.TargetLanguage,
         snapshot = new
         {
             status.SchemaVersion,
@@ -1422,6 +1463,8 @@ public static class Program
         freshness.IsFresh,
         freshness.CurrentFingerprint,
         freshness.IndexedFingerprint,
+        sourceLanguage = freshness.Snapshot?.SourceLanguage,
+        targetLanguage = freshness.Snapshot?.TargetLanguage,
         snapshot = freshness.Snapshot is null
             ? null
             : new
@@ -1475,7 +1518,9 @@ public static class Program
     {
         var value = new StringBuilder("falloutloc-profile-fingerprint-v2\n")
             .Append(configuration.Mode).Append('\0')
-            .Append(configuration.ProfileName).Append('\n');
+            .Append(configuration.ProfileName).Append('\0')
+            .Append(configuration.RequireLanguagePair().Source).Append('\0')
+            .Append(configuration.RequireLanguagePair().Target).Append('\n');
         foreach (var plugin in plugins.OrderBy(plugin => plugin.LoadOrderIndex))
         {
             value.Append(plugin.LoadOrderIndex).Append('\0')
@@ -1733,7 +1778,7 @@ public static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  faloudit --version");
         Console.WriteLine("  faloudit discover <mo2-root> [--profile <name>] [--workspace <path>] [--json]");
-        Console.WriteLine("  faloudit configure <mo2-root> [--profile <name>] [--workspace <path>] [--json]");
+        Console.WriteLine("  faloudit configure <mo2-root> --source-language <tag> --target-language <tag> [--profile <name>] [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit doctor [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit index [--status | --rebuild | --reparse] [--workspace <path>] [--json]");
         Console.WriteLine("  faloudit find <text> [--exact|--contains|--regex] [--ignore-case] [--plugin <name>] [--type <type>] [--category <category>] [--winner-only] [--limit <n>] [--cursor <value>] [--workspace <path>] [--json]");

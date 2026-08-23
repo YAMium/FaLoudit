@@ -4,7 +4,7 @@ namespace FalloutLoc.Index;
 
 internal static class SqliteSchema
 {
-    public const int Version = 4;
+    public const int Version = 5;
 
     public static void Create(SqliteConnection connection)
     {
@@ -18,7 +18,7 @@ internal static class SqliteSchema
             CREATE TABLE schema_info (
                 version INTEGER NOT NULL
             );
-            INSERT INTO schema_info(version) VALUES (4);
+            INSERT INTO schema_info(version) VALUES (5);
 
             CREATE TABLE snapshots (
                 id INTEGER PRIMARY KEY,
@@ -26,6 +26,8 @@ internal static class SqliteSchema
                 mode TEXT NOT NULL,
                 mo2_root TEXT NOT NULL,
                 profile_name TEXT NOT NULL,
+                source_language TEXT NOT NULL,
+                target_language TEXT NOT NULL,
                 load_order_fingerprint TEXT NOT NULL,
                 backend_name TEXT NOT NULL,
                 status TEXT NOT NULL

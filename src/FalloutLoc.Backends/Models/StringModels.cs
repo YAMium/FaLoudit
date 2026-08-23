@@ -1,33 +1,48 @@
+using System.Text.Json.Serialization;
+
 namespace FalloutLoc.Backends.Models;
 
 public enum StringEncodingEvidence
 {
     None,
     Ascii,
-    UnicodeCyrillic,
+    UnicodeTarget,
     Utf8Recovered,
-    Windows1251Recovered,
+    TargetCodePageRecovered,
+    SourceCodePageRecovered,
     SingleByteAmbiguous,
     UnrecoverableUnicode,
+
+    UnicodeCyrillic = UnicodeTarget,
+
+    Windows1251Recovered = TargetCodePageRecovered,
 }
 
 public enum TextLanguageKind
 {
     Empty,
-    Russian,
-    English,
+    Target,
+    Source,
     Other,
+
+    Russian = Target,
+
+    English = Source,
 }
 
 public enum PluginEncodingClass
 {
     AsciiOnlyOrNoUserText,
-    Windows1251,
+    TargetCodePage,
     Utf8,
-    UnicodeCyrillic,
+    UnicodeTarget,
     SingleByteAmbiguous,
     Mixed,
     UndecodableOrNonCp1252,
+
+    Windows1251 = TargetCodePage,
+
+    UnicodeCyrillic = UnicodeTarget,
 }
 
 public sealed record RawRecordString(string SemanticPath, string Category, string? BackendValue);
@@ -120,13 +135,19 @@ public sealed record PluginEncodingSummary
 
     public required int AsciiFields { get; init; }
 
-    public required int Windows1251Fields { get; init; }
+    public required int TargetCodePageFields { get; init; }
 
     public required int Utf8Fields { get; init; }
 
-    public required int UnicodeCyrillicFields { get; init; }
+    public required int UnicodeTargetFields { get; init; }
 
     public required int AmbiguousFields { get; init; }
 
     public required int UnrecoverableFields { get; init; }
+
+    [JsonIgnore]
+    public int Windows1251Fields => TargetCodePageFields;
+
+    [JsonIgnore]
+    public int UnicodeCyrillicFields => UnicodeTargetFields;
 }

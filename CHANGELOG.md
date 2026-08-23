@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 — unreleased
+
+- Added mandatory explicit `sourceLanguage` and `targetLanguage` project settings.
+- Added conservative language profiles for Windows-1250, Windows-1251,
+  Windows-1252, and Windows-1254 Fallout localizations.
+- Generalized indexed language roles and diagnostics from Russian/English to
+  target/source while retaining legacy internal enum aliases.
+- Added exact-source-reversion detection for target languages that share the
+  Latin script with English.
+- Advanced project configuration to schema 2, SQLite to schema 5, CLI JSON to
+  schema 2, and diagnostic snapshots to schema 2 with explicit migration rules.
+
 ## 0.3.2 — 2026-08-23
 
 - Updated the self-contained Windows runtime to .NET 10.0.11 security servicing.

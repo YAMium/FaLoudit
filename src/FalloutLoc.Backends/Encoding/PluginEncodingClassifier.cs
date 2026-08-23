@@ -10,23 +10,23 @@ public sealed class PluginEncodingClassifier : IPluginEncodingClassifier
         ArgumentNullException.ThrowIfNull(strings);
         var materialized = strings.ToArray();
         var ascii = Count(StringEncodingEvidence.Ascii);
-        var windows1251 = Count(StringEncodingEvidence.Windows1251Recovered);
+        var targetCodePage = Count(StringEncodingEvidence.TargetCodePageRecovered);
         var utf8 = Count(StringEncodingEvidence.Utf8Recovered);
-        var unicode = Count(StringEncodingEvidence.UnicodeCyrillic);
+        var unicode = Count(StringEncodingEvidence.UnicodeTarget);
         var ambiguous = Count(StringEncodingEvidence.SingleByteAmbiguous);
         var unrecoverable = Count(StringEncodingEvidence.UnrecoverableUnicode);
-        var positiveEncodingClasses = new[] { windows1251, utf8, unicode }.Count(count => count > 0);
+        var positiveEncodingClasses = new[] { targetCodePage, utf8, unicode }.Count(count => count > 0);
 
         var classification = unrecoverable > 0
             ? PluginEncodingClass.UndecodableOrNonCp1252
             : positiveEncodingClasses > 1
                 ? PluginEncodingClass.Mixed
-                : windows1251 > 0
-                    ? PluginEncodingClass.Windows1251
+                : targetCodePage > 0
+                    ? PluginEncodingClass.TargetCodePage
                     : utf8 > 0
                         ? PluginEncodingClass.Utf8
                         : unicode > 0
-                            ? PluginEncodingClass.UnicodeCyrillic
+                            ? PluginEncodingClass.UnicodeTarget
                             : ambiguous > 0
                                 ? PluginEncodingClass.SingleByteAmbiguous
                                 : PluginEncodingClass.AsciiOnlyOrNoUserText;
@@ -36,9 +36,9 @@ public sealed class PluginEncodingClassifier : IPluginEncodingClassifier
             Classification = classification,
             TotalFields = materialized.Length,
             AsciiFields = ascii,
-            Windows1251Fields = windows1251,
+            TargetCodePageFields = targetCodePage,
             Utf8Fields = utf8,
-            UnicodeCyrillicFields = unicode,
+            UnicodeTargetFields = unicode,
             AmbiguousFields = ambiguous,
             UnrecoverableFields = unrecoverable,
         };

@@ -14,7 +14,7 @@ public sealed class SqliteIndexBuilder(
     IPluginBackend backend,
     IPluginEncodingClassifier encodingClassifier)
 {
-    public const string IndexerCacheVersion = "6";
+    public const string IndexerCacheVersion = "7";
 
     public string CacheIdentity => $"{backend.Name}|schema={SqliteSchema.Version}|indexer={IndexerCacheVersion}";
 
@@ -200,14 +200,18 @@ public sealed class SqliteIndexBuilder(
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO snapshots(created_utc, mode, mo2_root, profile_name, load_order_fingerprint, backend_name, status)
-            VALUES ($created, $mode, $root, $profile, $fingerprint, $backend, 'building');
+            INSERT INTO snapshots(created_utc, mode, mo2_root, profile_name, source_language, target_language,
+                                  load_order_fingerprint, backend_name, status)
+            VALUES ($created, $mode, $root, $profile, $sourceLanguage, $targetLanguage,
+                    $fingerprint, $backend, 'building');
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$created", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$mode", request.Mode.ToString());
         command.Parameters.AddWithValue("$root", request.Mo2Root);
         command.Parameters.AddWithValue("$profile", request.ProfileName);
+        command.Parameters.AddWithValue("$sourceLanguage", request.SourceLanguage);
+        command.Parameters.AddWithValue("$targetLanguage", request.TargetLanguage);
         command.Parameters.AddWithValue("$fingerprint", request.LoadOrderFingerprint);
         command.Parameters.AddWithValue("$backend", CacheIdentity);
         return (long)command.ExecuteScalar()!;
@@ -305,7 +309,8 @@ public sealed class SqliteIndexBuilder(
             connection.Open();
             using var validate = connection.CreateCommand();
             validate.CommandText = """
-                SELECT (SELECT version FROM schema_info LIMIT 1), mode, backend_name, status
+                SELECT (SELECT version FROM schema_info LIMIT 1), mode, source_language, target_language,
+                       backend_name, status
                 FROM snapshots
                 ORDER BY id DESC LIMIT 1;
                 """;
@@ -313,8 +318,10 @@ public sealed class SqliteIndexBuilder(
             return reader.Read()
                 && reader.GetInt32(0) == SqliteSchema.Version
                 && reader.GetString(1) == request.Mode.ToString()
-                && reader.GetString(2) == CacheIdentity
-                && reader.GetString(3) == "complete";
+                && reader.GetString(2) == request.SourceLanguage
+                && reader.GetString(3) == request.TargetLanguage
+                && reader.GetString(4) == CacheIdentity
+                && reader.GetString(5) == "complete";
         }
         catch (SqliteException)
         {
@@ -348,6 +355,7 @@ public sealed class SqliteIndexBuilder(
         update.CommandText = """
             UPDATE snapshots
             SET created_utc = $created, mode = $mode, mo2_root = $root, profile_name = $profile,
+                source_language = $sourceLanguage, target_language = $targetLanguage,
                 load_order_fingerprint = $fingerprint, backend_name = $backend, status = 'building'
             WHERE id = $id;
             """;
@@ -355,6 +363,8 @@ public sealed class SqliteIndexBuilder(
         update.Parameters.AddWithValue("$mode", request.Mode.ToString());
         update.Parameters.AddWithValue("$root", request.Mo2Root);
         update.Parameters.AddWithValue("$profile", request.ProfileName);
+        update.Parameters.AddWithValue("$sourceLanguage", request.SourceLanguage);
+        update.Parameters.AddWithValue("$targetLanguage", request.TargetLanguage);
         update.Parameters.AddWithValue("$fingerprint", request.LoadOrderFingerprint);
         update.Parameters.AddWithValue("$backend", CacheIdentity);
         update.Parameters.AddWithValue("$id", snapshotId);

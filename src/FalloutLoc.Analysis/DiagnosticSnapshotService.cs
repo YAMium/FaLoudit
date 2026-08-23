@@ -9,7 +9,9 @@ public static class DiagnosticSnapshotService
         string indexFingerprint,
         IReadOnlyList<RecordDiagnostic> records,
         bool truncated,
-        DateTime createdUtc)
+        DateTime createdUtc,
+        string sourceLanguage = "source",
+        string targetLanguage = "target")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reportKind);
         ArgumentException.ThrowIfNullOrWhiteSpace(indexFingerprint);
@@ -27,7 +29,7 @@ public static class DiagnosticSnapshotService
             WinningPlugin = record.WinningPlugin ?? "unknown",
             WinningSourceMod = record.WinningSourceMod ?? "unknown",
             WinningText = field.Winner.Text,
-            EarlierRussianText = field.EarlierRussian?.Text,
+            EarlierTargetText = field.EarlierTarget?.Text,
         }))
             .GroupBy(finding => finding.Identity, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
@@ -36,6 +38,8 @@ public static class DiagnosticSnapshotService
         return new DiagnosticReportSnapshot
         {
             ReportKind = reportKind,
+            SourceLanguage = sourceLanguage,
+            TargetLanguage = targetLanguage,
             CreatedUtc = createdUtc.ToUniversalTime(),
             IndexFingerprint = indexFingerprint,
             Truncated = truncated,
@@ -49,9 +53,18 @@ public static class DiagnosticSnapshotService
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(current);
-        if (baseline.SchemaVersion != 1 || current.SchemaVersion != 1)
+        if (baseline.SchemaVersion != current.SchemaVersion
+            || baseline.SchemaVersion is not (1 or 2))
         {
-            throw new InvalidDataException("Only diagnostic snapshot schema version 1 is supported.");
+            throw new InvalidDataException(
+                "Diagnostic snapshots must use the same supported schema version (1 or 2).");
+        }
+
+        if (baseline.SchemaVersion == 2
+            && (!baseline.SourceLanguage.Equals(current.SourceLanguage, StringComparison.OrdinalIgnoreCase)
+                || !baseline.TargetLanguage.Equals(current.TargetLanguage, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidDataException("Cannot compare diagnostic snapshots for different language pairs.");
         }
 
         if (!baseline.ReportKind.Equals(current.ReportKind, StringComparison.OrdinalIgnoreCase))

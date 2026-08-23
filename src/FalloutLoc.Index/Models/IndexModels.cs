@@ -1,5 +1,6 @@
 using FalloutLoc.Backends.Models;
 using FalloutLoc.Core.Configuration;
+using System.Text.Json.Serialization;
 
 namespace FalloutLoc.Index.Models;
 
@@ -36,6 +37,8 @@ public sealed record IndexBuildRequest
     public required string Mo2Root { get; init; }
     public required string ProfileName { get; init; }
     public required string LoadOrderFingerprint { get; init; }
+    public required string SourceLanguage { get; init; }
+    public required string TargetLanguage { get; init; }
     public required IReadOnlyList<IndexPluginInput> Plugins { get; init; }
     public required IReadOnlyList<IndexPhysicalProviderInput> PhysicalProviders { get; init; }
     public string? PreviousDatabasePath { get; init; }
@@ -258,6 +261,8 @@ public sealed record IndexSnapshotStatus
     public required GameMode Mode { get; init; }
     public required string ProfileName { get; init; }
     public required string LoadOrderFingerprint { get; init; }
+    public required string SourceLanguage { get; init; }
+    public required string TargetLanguage { get; init; }
     public required string BackendName { get; init; }
     public required int ParsedPlugins { get; init; }
     public required int FailedPlugins { get; init; }
@@ -283,9 +288,14 @@ public sealed record IndexCoverageCategory
     public required string Category { get; init; }
     public required long Fields { get; init; }
     public required long NonEmptyFields { get; init; }
-    public required long RussianFields { get; init; }
-    public required long EnglishFields { get; init; }
+    public required long TargetFields { get; init; }
+    public required long SourceFields { get; init; }
     public required long AmbiguousFields { get; init; }
+
+    [JsonIgnore]
+    public long RussianFields => TargetFields;
+    [JsonIgnore]
+    public long EnglishFields => SourceFields;
 }
 
 public sealed record IndexCoverageIssue
@@ -307,6 +317,8 @@ public sealed record IndexCoverageReport
     public required GameMode Mode { get; init; }
     public required string ProfileName { get; init; }
     public required string LoadOrderFingerprint { get; init; }
+    public required string SourceLanguage { get; init; }
+    public required string TargetLanguage { get; init; }
     public required int TotalPlugins { get; init; }
     public required int ParsedPlugins { get; init; }
     public required int PartiallyParsedPlugins { get; init; }

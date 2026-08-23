@@ -145,7 +145,7 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
-        var fields = paths.Select(path => AnalyzeField(trace.Chain, path)).ToArray();
+        var fields = paths.Select(path => AnalyzeField(trace.Chain, path, status.SourceLanguage, status.TargetLanguage)).ToArray();
         var overall = SelectOverallStatus(winner, fields);
         var confidence = SelectOverallConfidence(overall, fields);
         return new RecordDiagnostic
@@ -182,6 +182,8 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
             .ToArray();
         return new RegressionReport
         {
+            SourceLanguage = status.SourceLanguage,
+            TargetLanguage = status.TargetLanguage,
             WinningPluginFilter = request.WinningPlugin,
             SourceModFilter = request.SourceMod,
             RecordTypeFilter = request.RecordType,
@@ -215,6 +217,8 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
             .ToArray();
         return new UntranslatedReport
         {
+            SourceLanguage = status.SourceLanguage,
+            TargetLanguage = status.TargetLanguage,
             WinningPluginFilter = request.WinningPlugin,
             SourceModFilter = request.SourceMod,
             RecordTypeFilter = request.RecordType,
@@ -227,8 +231,8 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
             Confidence = DiagnosticConfidence.Low,
             Records = records,
             IndexHasParseFailures = status.FailedPlugins > 0,
-            Caveat = "Latin-only winning text without an earlier active Russian value is only a review candidate; " +
-                "names, abbreviations, technical tokens, and intentional English may be valid.",
+            Caveat = $"Source-like winning text without an earlier active {status.TargetLanguage} value is only a review candidate; " +
+                $"names, abbreviations, technical tokens, and intentional {status.SourceLanguage} may be valid.",
             Limit = page.Limit,
             HasMore = page.HasMore,
             NextCursor = page.NextCursor,
@@ -293,7 +297,7 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
 
     public static bool IsUntranslatedReviewCandidate(RecordDiagnostic record, FieldDiagnostic field)
     {
-        if (field.Status != LocalizationDiagnosticStatus.EnglishWithoutActiveRussian
+        if (field.Status != LocalizationDiagnosticStatus.SourceWithoutActiveTarget
             || string.IsNullOrWhiteSpace(field.Winner.Text))
         {
             return false;
@@ -314,15 +318,31 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
         return true;
     }
 
-    private static FieldDiagnostic AnalyzeField(IReadOnlyList<IndexedOverride> chain, string path)
+    private static FieldDiagnostic AnalyzeField(
+        IReadOnlyList<IndexedOverride> chain,
+        string path,
+        string sourceLanguage,
+        string targetLanguage)
     {
         var winner = chain[^1];
         var winningField = winner.Strings.LastOrDefault(field => field.SemanticPath == path);
-        var previousRussian = chain.Take(chain.Count - 1)
+        var priorFields = chain.Take(chain.Count - 1)
             .Select(occurrence => (Occurrence: occurrence,
                 Field: occurrence.Strings.LastOrDefault(field => field.SemanticPath == path)))
-            .LastOrDefault(item => item.Field?.Language == TextLanguageKind.Russian);
-        var category = winningField?.Category ?? previousRussian.Field?.Category ?? "unknown";
+            .Where(item => item.Field is not null)
+            .ToArray();
+        var previousTarget = priorFields.LastOrDefault(item => item.Field?.Language == TextLanguageKind.Target);
+        var sourceBaseline = priorFields.FirstOrDefault(item => item.Field?.Language == TextLanguageKind.Source);
+        var inferredTarget = previousTarget.Field is null
+            && sourceBaseline.Field?.Text is not null
+            && winningField?.Language == TextLanguageKind.Source
+            && string.Equals(winningField.Text, sourceBaseline.Field.Text, StringComparison.Ordinal)
+            ? priorFields.LastOrDefault(item => !string.IsNullOrWhiteSpace(item.Field?.Text)
+                && !string.Equals(item.Field.Text, sourceBaseline.Field.Text, StringComparison.Ordinal))
+            : default;
+        var earlierTarget = previousTarget.Field is not null ? previousTarget : inferredTarget;
+        var targetWasInferred = previousTarget.Field is null && earlierTarget.Field is not null;
+        var category = winningField?.Category ?? earlierTarget.Field?.Category ?? "unknown";
         var synthesizedWinner = winningField ?? new IndexedTraceString
         {
             SemanticPath = path,
@@ -334,22 +354,25 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
         };
         var structuralChange = HasOrdinalStructuralChange(chain, path);
         var winnerOccurrence = ToDiagnosticOccurrence(winner, synthesizedWinner);
-        var earlierOccurrence = previousRussian.Field is null
+        var earlierOccurrence = earlierTarget.Field is null
             ? null
-            : ToDiagnosticOccurrence(previousRussian.Occurrence!, previousRussian.Field);
+            : ToDiagnosticOccurrence(earlierTarget.Occurrence!, earlierTarget.Field);
 
         var (diagnosticStatus, confidence, explanation) = Classify(
             winner,
             synthesizedWinner,
             earlierOccurrence,
-            structuralChange);
+            structuralChange,
+            targetWasInferred,
+            sourceLanguage,
+            targetLanguage);
         return new FieldDiagnostic
         {
             SemanticPath = path,
             Category = category,
             Status = diagnosticStatus,
             Confidence = confidence,
-            EarlierRussian = earlierOccurrence,
+            EarlierTarget = earlierOccurrence,
             Winner = winnerOccurrence,
             StructuralChange = structuralChange,
             Explanation = explanation,
@@ -359,8 +382,11 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
     private static (LocalizationDiagnosticStatus Status, DiagnosticConfidence Confidence, string Explanation) Classify(
         IndexedOverride winningRecord,
         IndexedTraceString winner,
-        DiagnosticStringOccurrence? earlierRussian,
-        bool structuralChange)
+        DiagnosticStringOccurrence? earlierTarget,
+        bool structuralChange,
+        bool targetWasInferred,
+        string sourceLanguage,
+        string targetLanguage)
     {
         if (winningRecord.IsDeleted)
         {
@@ -375,35 +401,36 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
                 "The winning value has ambiguous or unrecoverable encoding evidence.");
         }
 
-        if (earlierRussian is not null && winner.Language != TextLanguageKind.Russian)
+        if (earlierTarget is not null && winner.Language != TextLanguageKind.Target)
         {
             if (structuralChange)
             {
                 return (LocalizationDiagnosticStatus.Ambiguous, DiagnosticConfidence.Ambiguous,
-                    "An earlier Russian value exists, but this ordinal list changed shape; automatic field pairing is unsafe.");
+                    $"An earlier {targetLanguage} target value exists, but this ordinal list changed shape; automatic field pairing is unsafe.");
             }
 
             return winner.Language switch
             {
-                TextLanguageKind.English => (LocalizationDiagnosticStatus.TranslationRegression, DiagnosticConfidence.High,
-                    $"{winningRecord.PluginName} replaced the earlier Russian value from {earlierRussian.PluginName} with English."),
+                TextLanguageKind.Source => (LocalizationDiagnosticStatus.TranslationRegression,
+                    targetWasInferred ? DiagnosticConfidence.Medium : DiagnosticConfidence.High,
+                    $"{winningRecord.PluginName} replaced the earlier {targetLanguage} target value from {earlierTarget.PluginName} with {sourceLanguage} source text."),
                 TextLanguageKind.Empty => (LocalizationDiagnosticStatus.ClearedTranslation, DiagnosticConfidence.Medium,
-                    $"{winningRecord.PluginName} cleared or omitted the earlier Russian value from {earlierRussian.PluginName}."),
-                _ => (LocalizationDiagnosticStatus.NonRussianRegression, DiagnosticConfidence.Low,
-                    $"{winningRecord.PluginName} replaced the earlier Russian value with a value that is neither confidently Russian nor English."),
+                    $"{winningRecord.PluginName} cleared or omitted the earlier {targetLanguage} target value from {earlierTarget.PluginName}."),
+                _ => (LocalizationDiagnosticStatus.NonTargetRegression, DiagnosticConfidence.Low,
+                    $"{winningRecord.PluginName} replaced the earlier {targetLanguage} target value with a value that is neither confidently target nor source text."),
             };
         }
 
         return winner.Language switch
         {
-            TextLanguageKind.Russian => (LocalizationDiagnosticStatus.LocalizedRussian, DiagnosticConfidence.High,
-                "The winning value contains Cyrillic and is classified as Russian."),
-            TextLanguageKind.English => (LocalizationDiagnosticStatus.EnglishWithoutActiveRussian, DiagnosticConfidence.Low,
-                "The winner looks English, but no earlier active Russian value exists for this field; Latin text alone is not proof of a defect."),
+            TextLanguageKind.Target => (LocalizationDiagnosticStatus.LocalizedTarget, DiagnosticConfidence.High,
+                $"The winning value is classified as the configured target language ({targetLanguage})."),
+            TextLanguageKind.Source => (LocalizationDiagnosticStatus.SourceWithoutActiveTarget, DiagnosticConfidence.Low,
+                $"The winner looks like configured source text ({sourceLanguage}), but no earlier active {targetLanguage} target value exists; this alone is not proof of a defect."),
             TextLanguageKind.Empty => (LocalizationDiagnosticStatus.EmptyWinner, DiagnosticConfidence.Low,
-                "The winning field is empty and no earlier active Russian value was found."),
+                $"The winning field is empty and no earlier active {targetLanguage} target value was found."),
             _ => (LocalizationDiagnosticStatus.Neutral, DiagnosticConfidence.Low,
-                "The winning value is neutral or cannot be classified as Russian or English."),
+                $"The winning value is neutral or cannot be classified as {targetLanguage} target or {sourceLanguage} source text."),
         };
     }
 
@@ -502,10 +529,10 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
                  {
                      LocalizationDiagnosticStatus.TranslationRegression,
                      LocalizationDiagnosticStatus.ClearedTranslation,
-                     LocalizationDiagnosticStatus.NonRussianRegression,
+                     LocalizationDiagnosticStatus.NonTargetRegression,
                      LocalizationDiagnosticStatus.Ambiguous,
-                     LocalizationDiagnosticStatus.LocalizedRussian,
-                     LocalizationDiagnosticStatus.EnglishWithoutActiveRussian,
+                     LocalizationDiagnosticStatus.LocalizedTarget,
+                     LocalizationDiagnosticStatus.SourceWithoutActiveTarget,
                      LocalizationDiagnosticStatus.EmptyWinner,
                  })
         {
@@ -533,24 +560,24 @@ public sealed partial class LocalizationDiagnosticService(IIndexQuery index)
         return status switch
         {
             LocalizationDiagnosticStatus.TranslationRegression =>
-                $"The winning record in {winningPlugin} contains {count} high-confidence Russian-to-English regression(s).",
+                $"The winning record in {winningPlugin} contains {count} target-to-source regression(s).",
             LocalizationDiagnosticStatus.ClearedTranslation =>
-                $"The winning record in {winningPlugin} clears {count} earlier Russian field(s).",
+                $"The winning record in {winningPlugin} clears {count} earlier target-language field(s).",
             LocalizationDiagnosticStatus.Ambiguous =>
                 "The record contains structural or encoding ambiguity and requires manual/xEdit review.",
-            LocalizationDiagnosticStatus.LocalizedRussian =>
-                "The winning record retains Russian localized text.",
+            LocalizationDiagnosticStatus.LocalizedTarget =>
+                "The winning record retains target-language localized text.",
             LocalizationDiagnosticStatus.DeletedWinner =>
                 $"The winning override in {winningPlugin} deletes the record.",
-            _ => $"The winning record is supplied by {winningPlugin}; no high-confidence RU-to-EN regression was proven.",
+            _ => $"The winning record is supplied by {winningPlugin}; no high-confidence target-to-source regression was proven.",
         };
     }
 
     private static bool IsRegression(FieldDiagnostic field) =>
         field.Status is LocalizationDiagnosticStatus.TranslationRegression or
             LocalizationDiagnosticStatus.ClearedTranslation or
-            LocalizationDiagnosticStatus.NonRussianRegression
-        || field.Status == LocalizationDiagnosticStatus.Ambiguous && field.EarlierRussian is not null;
+            LocalizationDiagnosticStatus.NonTargetRegression
+        || field.Status == LocalizationDiagnosticStatus.Ambiguous && field.EarlierTarget is not null;
 
     private static LocalizationMatchQuality MatchQuality(string query, string? text)
     {
