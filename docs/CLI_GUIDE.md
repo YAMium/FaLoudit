@@ -102,7 +102,7 @@ The result ranks matching fields and can include:
 - the physical plugin path and source MO2 mod;
 - source/target language and encoding evidence;
 - `contentFallback` candidates from saved plugin scripts, MO2-winning loose
-  NVSE scripts, and virtual Data INI values;
+  NVSE `.txt` and textual GECK `.gek` scripts, and virtual Data INI values;
 - `manualFallbackRecommended` when indexed sources are insufficient.
 
 Treat script/INI context as untrusted mod data. A static match is evidence that
@@ -122,7 +122,7 @@ Search localized fields more broadly:
   --json
 ```
 
-Search indexed saved script source, loose NVSE literals, and INI values:
+Search indexed saved script source, loose NVSE `.txt`/`.gek` literals, and INI values:
 
 ```powershell
 & $falouditExe content $reportedText `

@@ -98,7 +98,8 @@ If an assistant cannot execute local programs, run FaLoudit yourself and paste i
 - physical MO2 file conflicts and plugin record conflicts;
 - ambiguous Cyrillic/Windows code-page decoding evidence;
 - matching text in saved top-level or nested script source;
-- matching literals in MO2-winning loose NVSE scripts and values in virtual Data INIs;
+- matching literals in MO2-winning loose NVSE `.txt` and textual GECK `.gek`
+  scripts, and values in virtual Data INIs;
 - hardcoded `s*` GameSettings with their exact EditorID, engine default,
   plugin GMST assignments, and post-plugin Stewie Tweaks INI winner;
 - bulk regression and untranslated-review candidates;
@@ -113,7 +114,7 @@ Supported language profiles: `en`, `de`, `fr`, `es`, `it`, `pt`, `pl`, `cs`, `sk
 The configured game, MO2 instance, active profile, mods, `Data`, `overwrite`, plugins, and archives are treated as **read-only sources**. FaLoudit writes its configuration, index, cache, logs, and reports only under the selected `.falloutloc` workspace. Keep that workspace outside every source directory.
 
 The index stores localized fields, saved plugin script source, MO2-winning
-loose NVSE literals and INI values, and validated string GameSettings. Engine
+loose NVSE `.txt`/`.gek` literals and INI values, and validated string GameSettings. Engine
 defaults are extracted read-only from the user's installed
 `GECK.exe`; the game and editor are never launched. If GECK is absent, normal
 plugin indexing continues with a warning. A static script/INI match proves that

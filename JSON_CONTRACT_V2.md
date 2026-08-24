@@ -81,8 +81,9 @@ catalog/runtime paths, and warnings. These are additive schema-2 fields.
 
 ## Loose content
 
-FaLoudit 0.4.2 adds MO2-winning loose NVSE script literals and virtual Data INI
-values to `content` and `analyze.contentFallback`. They use a synthetic identity:
+FaLoudit 0.4.2 adds MO2-winning loose NVSE script literals from supported `.txt`
+and textual GECK `.gek` sources, plus virtual Data INI values, to `content` and
+`analyze.contentFallback`. They use a synthetic identity:
 
 ```text
 file:<logical Data path>

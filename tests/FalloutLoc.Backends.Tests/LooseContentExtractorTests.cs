@@ -11,7 +11,7 @@ public sealed class LooseContentExtractorTests
         new StrictPluginStringDecoder("en", "ru"));
 
     [Fact]
-    public void ExtractsQuotedScriptLiteralsWithExecutableLineContext()
+    public void ExtractsQuotedTextualGeckScriptLiteralsWithExecutableLineContext()
     {
         System.Text.Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var bytes = System.Text.Encoding.GetEncoding(1251).GetBytes("""
@@ -22,7 +22,7 @@ public sealed class LooseContentExtractorTests
             """);
 
         var result = _extractor.Extract(
-            @"NVSE\Plugins\Scripts\example.txt",
+            @"NVSE\user_defined_functions\Example\Display.gek",
             RecordContentSourceKind.LooseScript,
             bytes);
 

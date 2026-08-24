@@ -1533,7 +1533,19 @@ public static class Program
             discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
             RecordContentSourceKind.LooseScript);
         Add(resolver.ResolveDirectoryFiles(
+            Path.Combine("NVSE", "Plugins", "Scripts"), ".gek",
+            discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.LooseScript);
+        Add(resolver.ResolveDirectoryFiles(
             Path.Combine("NVSE", "user_defined_functions"), ".txt",
+            discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.LooseScript);
+        Add(resolver.ResolveDirectoryFiles(
+            Path.Combine("NVSE", "user_defined_functions"), ".gek",
+            discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.LooseScript);
+        Add(resolver.ResolveDirectoryFiles(
+            Path.Combine("NVSE", "CompileScript"), ".gek",
             discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
             RecordContentSourceKind.LooseScript);
 

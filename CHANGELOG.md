@@ -3,7 +3,9 @@
 ## 0.4.2 — 2026-08-24
 
 - Added MO2-aware indexing of winning loose NVSE scripts from
-  `NVSE/Plugins/Scripts` and `NVSE/user_defined_functions`.
+  `NVSE/Plugins/Scripts`, `NVSE/user_defined_functions`, and
+  `NVSE/CompileScript`, including both `.txt` and textual GECK `.gek` sources
+  where those formats are used.
 - Added searchable values from MO2-winning virtual Data INI files while
   excluding comments, `meta.ini`, `.mohidden` trees, and Windows `desktop.ini`.
 - Added synthetic `file:<logical-path>` content identities with physical path,

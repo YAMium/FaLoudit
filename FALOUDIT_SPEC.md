@@ -1057,9 +1057,10 @@ index freshness fingerprint. SQLite schema 5 is rebuilt atomically as schema 6.
 The fallback content index includes read-only evidence from active virtual Data
 files outside ESM/ESP:
 
-1. quoted literals in MO2-winning `NVSE/Plugins/Scripts/**/*.txt`;
-2. quoted literals in MO2-winning `NVSE/user_defined_functions/**/*.txt`;
-3. values from MO2-winning virtual Data `*.ini` files.
+1. quoted literals in MO2-winning `NVSE/Plugins/Scripts/**/*.{txt,gek}`;
+2. quoted literals in MO2-winning `NVSE/user_defined_functions/**/*.{txt,gek}`;
+3. quoted literals in MO2-winning `NVSE/CompileScript/**/*.gek`;
+4. values from MO2-winning virtual Data `*.ini` files.
 
 Loose content uses `file:<logical Data path>` identities and must never be
 presented as a plugin FormID. Store the physical winner, source MO2 mod,
