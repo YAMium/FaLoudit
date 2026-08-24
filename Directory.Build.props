@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <VersionPrefix>0.4.1</VersionPrefix>
+    <VersionPrefix>0.4.2</VersionPrefix>
     <Authors>YAMium</Authors>
     <Company>YAMium</Company>
     <Copyright>Copyright (C) 2026 YAMium</Copyright>

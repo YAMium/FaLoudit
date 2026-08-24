@@ -53,6 +53,31 @@ public sealed record IndexPostPluginGameSettingInput
     public required int Sequence { get; init; }
 }
 
+public sealed record IndexLooseContentEntryInput
+{
+    public required string SemanticPath { get; init; }
+    public required string Text { get; init; }
+    public required string Context { get; init; }
+    public required int LineNumber { get; init; }
+    public required StringEncodingEvidence EncodingEvidence { get; init; }
+    public required bool Ambiguous { get; init; }
+    public required bool IsHeuristic { get; init; }
+}
+
+public sealed record IndexLooseContentFileInput
+{
+    public required string LogicalPath { get; init; }
+    public required string PhysicalPath { get; init; }
+    public required string SourceMod { get; init; }
+    public required long EffectivePriority { get; init; }
+    public required RecordContentSourceKind SourceKind { get; init; }
+    public required long FileLength { get; init; }
+    public required DateTime LastWriteUtc { get; init; }
+    public string? Sha256 { get; init; }
+    public IReadOnlyList<IndexLooseContentEntryInput> Entries { get; init; } = [];
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+}
+
 public sealed record IndexBuildRequest
 {
     public required string DestinationPath { get; init; }
@@ -66,6 +91,8 @@ public sealed record IndexBuildRequest
     public required IReadOnlyList<IndexPhysicalProviderInput> PhysicalProviders { get; init; }
     public IReadOnlyList<IndexEngineGameSettingInput> EngineGameSettings { get; init; } = [];
     public IReadOnlyList<IndexPostPluginGameSettingInput> PostPluginGameSettings { get; init; } = [];
+    public IReadOnlyList<IndexLooseContentFileInput> LooseContentFiles { get; init; } = [];
+    public IReadOnlyList<string> LooseContentWarnings { get; init; } = [];
     public string EngineGameSettingCatalogStatus { get; init; } = "unavailable";
     public string? EngineGameSettingCatalogPath { get; init; }
     public string? RuntimeExecutablePath { get; init; }
@@ -100,6 +127,9 @@ public sealed record IndexBuildResult
     public long Contents { get; init; }
     public int EngineGameSettings { get; init; }
     public int PostPluginGameSettingOverrides { get; init; }
+    public int LooseContentFiles { get; init; }
+    public int LooseContentEntries { get; init; }
+    public IReadOnlyList<string> LooseContentWarnings { get; init; } = [];
     public required string EngineGameSettingCatalogStatus { get; init; }
     public IReadOnlyList<string> EngineGameSettingWarnings { get; init; } = [];
     public required TimeSpan Duration { get; init; }
@@ -153,11 +183,13 @@ public sealed record IndexedContentMatch
     public required int LoadOrderIndex { get; init; }
     public required string PhysicalPath { get; init; }
     public required string SourceMod { get; init; }
+    public required long EffectivePriority { get; init; }
     public required string SemanticPath { get; init; }
     public required RecordContentSourceKind SourceKind { get; init; }
     public required string Context { get; init; }
     public required int ContextStart { get; init; }
     public required int ContentLength { get; init; }
+    public int? LineNumber { get; init; }
     public required StringEncodingEvidence EncodingEvidence { get; init; }
     public required bool Ambiguous { get; init; }
     public required bool IsHeuristic { get; init; }
@@ -308,6 +340,9 @@ public sealed record IndexSnapshotStatus
     public string? EngineGameSettingCatalogPath { get; init; }
     public string? RuntimeExecutablePath { get; init; }
     public IReadOnlyList<string> EngineGameSettingWarnings { get; init; } = [];
+    public int LooseContentFiles { get; init; }
+    public int LooseContentEntries { get; init; }
+    public IReadOnlyList<string> LooseContentWarnings { get; init; } = [];
 }
 
 public sealed record IndexCoverageRecordType
@@ -374,6 +409,8 @@ public sealed record IndexCoverageReport
     public int EngineGameSettings { get; init; }
     public int PostPluginGameSettingOverrides { get; init; }
     public string EngineGameSettingCatalogStatus { get; init; } = "unavailable";
+    public int LooseContentFiles { get; init; }
+    public int LooseContentEntries { get; init; }
     public required bool IssuesTruncated { get; init; }
     public required IReadOnlyList<IndexCoverageRecordType> RecordTypes { get; init; }
     public required IReadOnlyList<IndexCoverageCategory> Categories { get; init; }

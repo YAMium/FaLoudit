@@ -63,8 +63,8 @@ public static class IndexFreshnessEvaluator
                 IndexedFingerprint = snapshot.LoadOrderFingerprint,
                 Snapshot = snapshot,
                 Explanation = fresh
-                    ? "The configured profile, active load order, physical providers, plugin metadata, and GameSetting sources match the published snapshot."
-                    : "The configured profile, active load order, physical providers, plugin metadata, or GameSetting sources changed after the published snapshot.",
+                    ? "The configured profile, active load order, physical providers, plugin metadata, GameSetting sources, and loose content match the published snapshot."
+                    : "The configured profile, active load order, physical providers, plugin metadata, GameSetting sources, or loose content changed after the published snapshot.",
             };
         }
         catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)

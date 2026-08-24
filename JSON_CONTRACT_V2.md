@@ -47,7 +47,7 @@ Field diagnostics use `earlierTarget`; rendered/snapshot evidence uses
 ## Versioned stores
 
 - Project configuration schema: `2`.
-- SQLite index schema: `6`.
+- SQLite index schema: `7`.
 - Diagnostic snapshot schema: `2`.
 
 A schema-1 project configuration is readable only to produce an actionable
@@ -78,6 +78,26 @@ String search results add `sourceKind` with `engineDefault`, `plugin`, or
 `postPluginIni`. Index snapshot metadata adds `engineGameSettings`,
 `postPluginGameSettingOverrides`, `engineGameSettingCatalogStatus`, optional
 catalog/runtime paths, and warnings. These are additive schema-2 fields.
+
+## Loose content
+
+FaLoudit 0.4.2 adds MO2-winning loose NVSE script literals and virtual Data INI
+values to `content` and `analyze.contentFallback`. They use a synthetic identity:
+
+```text
+file:<logical Data path>
+```
+
+This is a file identity, not a FormKey or FormID. Loose results add
+`sourceKind: looseScript | iniValue`, `lineNumber`, logical path in
+`pluginName`, physical winner, source MO2 mod, semantic line or INI key, and
+bounded `context`. `loadOrderIndex` is `-1` because files have no plugin load
+order. `isWinningOverride` is true because only the MO2 physical
+winner for a logical path is indexed. It does not assert that a script executed
+or that an INI consumer used the value.
+
+Index snapshot metadata adds `looseContentFiles`, `looseContentEntries`, and
+warnings. These fields are additive within top-level JSON schema 2.
 
 ## Compatibility rule
 

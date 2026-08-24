@@ -23,14 +23,14 @@
 
 > Why is this exact text visible in game, which plugin and physical MO2 file won, and where was the target-language translation lost?
 
-FaLoudit does the deterministic work: it discovers the active MO2 profile, indexes localization fields and saved script source, resolves record override chains, and maps the winning plugin file back to its MO2 mod. A terminal-capable AI assistant such as Codex can run those commands, interpret the JSON evidence, and return a concise diagnosis instead of a wall of raw records.
+FaLoudit does the deterministic work: it discovers the active MO2 profile, indexes localization fields, saved plugin scripts, MO2-winning loose NVSE scripts and INI values, resolves record override chains, and maps physical winners back to their MO2 mods. A terminal-capable AI assistant such as Codex can run those commands, interpret the JSON evidence, and return a concise diagnosis instead of a wall of raw records.
 
 It does **not** edit plugins, generate patches, sort load order, or alter the game setup.
 
 ## Fastest start: Codex project
 
 1. Open the [latest release](https://github.com/YAMium/FaLoudit/releases/latest).
-2. Download `faloudit-codex-project-<version>.zip` — for example, `faloudit-codex-project-0.4.1.zip`.
+2. Download `faloudit-codex-project-<version>.zip` — for example, `faloudit-codex-project-0.4.2.zip`.
 3. Extract it to a new folder **outside** the game and MO2 directories.
 4. Open that folder as a project in Codex.
 5. Send this first message:
@@ -61,7 +61,7 @@ flowchart LR
     B --> C{Indexed localization match?}
     C -->|Plugin record| D[Record override chain]
     C -->|Engine GameSetting| J[EXE default → GMST → Stewie INI]
-    C -->|No| E[Saved script content]
+    C -->|No| E[Saved and loose script / INI content]
     E -->|Still missing| F[Read-only manual fallback]
     D --> G[Winning plugin record]
     J --> H
@@ -98,6 +98,7 @@ If an assistant cannot execute local programs, run FaLoudit yourself and paste i
 - physical MO2 file conflicts and plugin record conflicts;
 - ambiguous Cyrillic/Windows code-page decoding evidence;
 - matching text in saved top-level or nested script source;
+- matching literals in MO2-winning loose NVSE scripts and values in virtual Data INIs;
 - hardcoded `s*` GameSettings with their exact EditorID, engine default,
   plugin GMST assignments, and post-plugin Stewie Tweaks INI winner;
 - bulk regression and untranslated-review candidates;
@@ -111,11 +112,13 @@ Supported language profiles: `en`, `de`, `fr`, `es`, `it`, `pt`, `pl`, `cs`, `sk
 
 The configured game, MO2 instance, active profile, mods, `Data`, `overwrite`, plugins, and archives are treated as **read-only sources**. FaLoudit writes its configuration, index, cache, logs, and reports only under the selected `.falloutloc` workspace. Keep that workspace outside every source directory.
 
-The index stores localized fields, saved script source, and validated string
-GameSettings. Engine defaults are extracted read-only from the user's installed
+The index stores localized fields, saved plugin script source, MO2-winning
+loose NVSE literals and INI values, and validated string GameSettings. Engine
+defaults are extracted read-only from the user's installed
 `GECK.exe`; the game and editor are never launched. If GECK is absent, normal
-plugin indexing continues with a warning. A static script match proves that
-text exists, not that the code executed at runtime. Arbitrary executable strings
+plugin indexing continues with a warning. A static script/INI match proves that
+text exists in the active physical file, not that code executed or the value was
+consumed at runtime. Arbitrary executable strings
 outside the GameSetting catalog and unsupported or compiled-only content may
 still require the read-only manual fallback.
 

@@ -263,7 +263,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             throw new ArgumentException("A regular expression cannot exceed 1000 characters.", nameof(request));
         }
 
-        var scope = string.Join('\0', "content-v1", request.Query, request.Mode, request.IgnoreCase,
+        var scope = string.Join('\0', "content-v2", request.Query, request.Mode, request.IgnoreCase,
             request.PluginName, request.RecordType, request.SourceKind, request.WinnerOnly);
         var offset = DecodeCursor(request.Cursor, scope);
         using var connection = OpenValidated();
@@ -302,11 +302,11 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var escaped = EscapeLike(normalized);
         var matchPredicate = request.Mode switch
         {
-            IndexedTextSearchMode.Exact when request.IgnoreCase => "c.normalized_text = $normalized",
-            IndexedTextSearchMode.Exact => "c.text = $query COLLATE BINARY",
-            IndexedTextSearchMode.Contains when request.IgnoreCase => "instr(c.normalized_text, $normalized) > 0",
-            IndexedTextSearchMode.Contains => "instr(c.text, $query) > 0",
-            IndexedTextSearchMode.Regex => "faloudit_content_regex(c.text) = 1",
+            IndexedTextSearchMode.Exact when request.IgnoreCase => "u.normalized_text = $normalized",
+            IndexedTextSearchMode.Exact => "u.text = $query COLLATE BINARY",
+            IndexedTextSearchMode.Contains when request.IgnoreCase => "instr(u.normalized_text, $normalized) > 0",
+            IndexedTextSearchMode.Contains => "instr(u.text, $query) > 0",
+            IndexedTextSearchMode.Regex => "faloudit_content_regex(u.text) = 1",
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Mode, "Unsupported content search mode."),
         };
         var rankExpression = request.Mode switch
@@ -315,15 +315,15 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             IndexedTextSearchMode.Regex => "(3 + 0)",
             _ when request.IgnoreCase => """
                 CASE
-                    WHEN c.normalized_text = $normalized THEN 0
-                    WHEN instr(c.normalized_text, $normalized) = 1 THEN 1
+                    WHEN u.normalized_text = $normalized THEN 0
+                    WHEN instr(u.normalized_text, $normalized) = 1 THEN 1
                     ELSE 2
                 END
                 """,
             _ => """
                 CASE
-                    WHEN c.text = $query COLLATE BINARY THEN 0
-                    WHEN instr(c.text, $query) = 1 THEN 1
+                    WHEN u.text = $query COLLATE BINARY THEN 0
+                    WHEN instr(u.text, $query) = 1 THEN 1
                     ELSE 2
                 END
                 """,
@@ -331,41 +331,65 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var predicates = new List<string> { matchPredicate };
         if (!string.IsNullOrWhiteSpace(request.PluginName))
         {
-            predicates.Add("p.name = $plugin COLLATE NOCASE");
+            predicates.Add("u.plugin_name = $plugin COLLATE NOCASE");
         }
 
         if (!string.IsNullOrWhiteSpace(request.RecordType))
         {
-            predicates.Add("r.record_type = $type COLLATE NOCASE");
+            predicates.Add("u.record_type = $type COLLATE NOCASE");
         }
 
         if (request.SourceKind is not null)
         {
-            predicates.Add("c.source_kind = $kind");
+            predicates.Add("u.source_kind = $kind");
         }
 
         if (request.WinnerOnly)
         {
-            predicates.Add(winnerExpression);
+            predicates.Add("u.is_winner = 1");
         }
 
         using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT r.form_key, r.record_type, r.editor_id,
-                   p.name, p.load_order_index, p.physical_path, p.source_mod,
-                   c.semantic_path, c.source_kind, c.text, c.encoding_evidence, c.ambiguous, c.is_heuristic,
-                   CASE WHEN {winnerExpression} THEN 1 ELSE 0 END AS is_winner
-            FROM record_contents c
-            JOIN records r ON r.id = c.record_id
-            JOIN plugins p ON p.id = r.plugin_id
+            WITH unified_content AS (
+                SELECT r.form_key, r.record_type, r.editor_id,
+                       p.name AS plugin_name, p.load_order_index, p.physical_path, p.source_mod,
+                       p.effective_priority,
+                       c.semantic_path, c.source_kind, c.text, c.normalized_text,
+                       COALESCE(c.text, '') AS context, NULL AS line_number,
+                       c.encoding_evidence, c.ambiguous, c.is_heuristic,
+                       CASE WHEN {winnerExpression} THEN 1 ELSE 0 END AS is_winner,
+                       p.load_order_index AS source_order, c.id AS stable_id
+                FROM record_contents c
+                JOIN records r ON r.id = c.record_id
+                JOIN plugins p ON p.id = r.plugin_id
+
+                UNION ALL
+
+                SELECT 'file:' || f.logical_path,
+                       CASE f.source_kind WHEN 'LooseScript' THEN 'LooseScript' ELSE 'IniFile' END,
+                       NULL, f.logical_path, -1, f.physical_path, f.source_mod,
+                       f.effective_priority,
+                       e.semantic_path, f.source_kind, e.text, e.normalized_text,
+                       e.context, e.line_number, e.encoding_evidence, e.ambiguous, e.is_heuristic,
+                       1, f.effective_priority, e.id
+                FROM loose_content_entries e
+                JOIN loose_content_files f ON f.id = e.file_id
+            )
+            SELECT u.form_key, u.record_type, u.editor_id,
+                   u.plugin_name, u.load_order_index, u.physical_path, u.source_mod,
+                   u.effective_priority,
+                   u.semantic_path, u.source_kind, u.text, u.context, u.line_number,
+                   u.encoding_evidence, u.ambiguous, u.is_heuristic, u.is_winner
+            FROM unified_content u
             WHERE {string.Join(" AND ", predicates)}
             ORDER BY
                 {rankExpression},
-                is_winner DESC,
-                p.load_order_index DESC,
-                r.form_key COLLATE NOCASE,
-                c.semantic_path COLLATE NOCASE,
-                c.id
+                u.is_winner DESC,
+                u.source_order DESC,
+                u.form_key COLLATE NOCASE,
+                u.semantic_path COLLATE NOCASE,
+                u.stable_id
             LIMIT $take OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$query", request.Query);
@@ -381,8 +405,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var results = new List<IndexedContentMatch>();
         while (reader.Read())
         {
-            var content = reader.IsDBNull(9) ? string.Empty : reader.GetString(9);
-            var context = BuildContentContext(content, request, regex);
+            var contextSource = reader.IsDBNull(11) ? string.Empty : reader.GetString(11);
+            var context = BuildContentContext(contextSource, request, regex);
             results.Add(new IndexedContentMatch
             {
                 FormKey = reader.GetString(0),
@@ -392,15 +416,17 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 LoadOrderIndex = reader.GetInt32(4),
                 PhysicalPath = reader.GetString(5),
                 SourceMod = reader.GetString(6),
-                SemanticPath = reader.GetString(7),
-                SourceKind = Enum.Parse<RecordContentSourceKind>(reader.GetString(8)),
+                EffectivePriority = reader.GetInt64(7),
+                SemanticPath = reader.GetString(8),
+                SourceKind = Enum.Parse<RecordContentSourceKind>(reader.GetString(9)),
                 Context = context.Text,
                 ContextStart = context.Start,
-                ContentLength = content.Length,
-                EncodingEvidence = Enum.Parse<StringEncodingEvidence>(reader.GetString(10)),
-                Ambiguous = reader.GetBoolean(11),
-                IsHeuristic = reader.GetBoolean(12),
-                IsWinningOverride = reader.GetBoolean(13),
+                ContentLength = contextSource.Length,
+                LineNumber = reader.IsDBNull(12) ? null : reader.GetInt32(12),
+                EncodingEvidence = Enum.Parse<StringEncodingEvidence>(reader.GetString(13)),
+                Ambiguous = reader.GetBoolean(14),
+                IsHeuristic = reader.GetBoolean(15),
+                IsWinningOverride = reader.GetBoolean(16),
             });
         }
 
@@ -966,7 +992,12 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                    s.engine_game_setting_catalog_status,
                    s.engine_game_setting_catalog_path,
                    s.runtime_executable_path,
-                   s.engine_game_setting_warnings
+                   s.engine_game_setting_warnings,
+                   (SELECT COUNT(*) FROM loose_content_files loose WHERE loose.snapshot_id = s.id),
+                   (SELECT COUNT(*) FROM loose_content_entries entry
+                     JOIN loose_content_files loose ON loose.id = entry.file_id
+                    WHERE loose.snapshot_id = s.id),
+                   s.loose_content_warnings
             FROM snapshots s
             LEFT JOIN plugins p ON p.snapshot_id = s.id
             WHERE s.status = 'complete'
@@ -1001,6 +1032,11 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             EngineGameSettingWarnings = reader.IsDBNull(16)
                 ? []
                 : JsonSerializer.Deserialize<string[]>(reader.GetString(16)) ?? [],
+            LooseContentFiles = reader.GetInt32(17),
+            LooseContentEntries = reader.GetInt32(18),
+            LooseContentWarnings = reader.IsDBNull(19)
+                ? []
+                : JsonSerializer.Deserialize<string[]>(reader.GetString(19)) ?? [],
         };
         return _statusCache;
     }
@@ -1053,6 +1089,8 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             EngineGameSettings = status.EngineGameSettings,
             PostPluginGameSettingOverrides = status.PostPluginGameSettingOverrides,
             EngineGameSettingCatalogStatus = status.EngineGameSettingCatalogStatus,
+            LooseContentFiles = status.LooseContentFiles,
+            LooseContentEntries = status.LooseContentEntries,
             IssuesTruncated = issues.Count > issueLimit,
             RecordTypes = recordTypes,
             Categories = categories,

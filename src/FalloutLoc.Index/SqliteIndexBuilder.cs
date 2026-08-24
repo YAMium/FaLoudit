@@ -14,7 +14,7 @@ public sealed class SqliteIndexBuilder(
     IPluginBackend backend,
     IPluginEncodingClassifier encodingClassifier)
 {
-    public const string IndexerCacheVersion = "8";
+    public const string IndexerCacheVersion = "9";
 
     public string CacheIdentity => $"{backend.Name}|schema={SqliteSchema.Version}|indexer={IndexerCacheVersion}";
 
@@ -70,6 +70,7 @@ public sealed class SqliteIndexBuilder(
                     snapshotId = ResetClonedSnapshot(connection, request);
                     ReplaceProviders(connection, snapshotId, request.PhysicalProviders);
                     ReplaceGameSettings(connection, snapshotId, request);
+                    ReplaceLooseContent(connection, snapshotId, request);
                     work = PrepareClonedPlugins(connection, snapshotId, request.Plugins);
                 }
                 else
@@ -78,6 +79,7 @@ public sealed class SqliteIndexBuilder(
                     snapshotId = InsertSnapshot(connection, request);
                     InsertProviders(connection, snapshotId, request.PhysicalProviders);
                     InsertGameSettings(connection, snapshotId, request);
+                    InsertLooseContent(connection, snapshotId, request);
                     work = request.Plugins.OrderBy(plugin => plugin.LoadOrderIndex)
                         .Select(plugin => new PluginWorkItem(plugin, InsertPlugin(connection, snapshotId, plugin)))
                         .ToArray();
@@ -188,6 +190,9 @@ public sealed class SqliteIndexBuilder(
                 Contents = totalContents,
                 EngineGameSettings = request.EngineGameSettings.Count,
                 PostPluginGameSettingOverrides = request.PostPluginGameSettings.Count,
+                LooseContentFiles = request.LooseContentFiles.Count,
+                LooseContentEntries = request.LooseContentFiles.Sum(file => file.Entries.Count),
+                LooseContentWarnings = request.LooseContentWarnings,
                 EngineGameSettingCatalogStatus = request.EngineGameSettingCatalogStatus,
                 EngineGameSettingWarnings = request.EngineGameSettingWarnings,
                 Duration = stopwatch.Elapsed,
@@ -209,10 +214,11 @@ public sealed class SqliteIndexBuilder(
             INSERT INTO snapshots(created_utc, mode, mo2_root, profile_name, source_language, target_language,
                                   load_order_fingerprint, backend_name,
                                   engine_game_setting_catalog_status, engine_game_setting_catalog_path,
-                                  runtime_executable_path, engine_game_setting_warnings, status)
+                                  runtime_executable_path, engine_game_setting_warnings,
+                                  loose_content_warnings, status)
             VALUES ($created, $mode, $root, $profile, $sourceLanguage, $targetLanguage,
                     $fingerprint, $backend, $catalogStatus, $catalogPath,
-                    $runtimePath, $catalogWarnings, 'building');
+                    $runtimePath, $catalogWarnings, $looseWarnings, 'building');
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$created", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
@@ -230,7 +236,106 @@ public sealed class SqliteIndexBuilder(
             ? DBNull.Value : request.RuntimeExecutablePath);
         command.Parameters.AddWithValue("$catalogWarnings", request.EngineGameSettingWarnings.Count == 0
             ? DBNull.Value : JsonSerializer.Serialize(request.EngineGameSettingWarnings));
+        command.Parameters.AddWithValue("$looseWarnings", request.LooseContentWarnings.Count == 0
+            ? DBNull.Value : JsonSerializer.Serialize(request.LooseContentWarnings));
         return (long)command.ExecuteScalar()!;
+    }
+
+    private static void ReplaceLooseContent(
+        SqliteConnection connection,
+        long snapshotId,
+        IndexBuildRequest request)
+    {
+        using (var deleteEntries = connection.CreateCommand())
+        {
+            deleteEntries.CommandText = """
+                DELETE FROM loose_content_entries
+                WHERE file_id IN (SELECT id FROM loose_content_files WHERE snapshot_id = $snapshot);
+                """;
+            deleteEntries.Parameters.AddWithValue("$snapshot", snapshotId);
+            deleteEntries.ExecuteNonQuery();
+        }
+
+        using (var deleteFiles = connection.CreateCommand())
+        {
+            deleteFiles.CommandText = "DELETE FROM loose_content_files WHERE snapshot_id = $snapshot;";
+            deleteFiles.Parameters.AddWithValue("$snapshot", snapshotId);
+            deleteFiles.ExecuteNonQuery();
+        }
+
+        InsertLooseContent(connection, snapshotId, request);
+    }
+
+    private static void InsertLooseContent(
+        SqliteConnection connection,
+        long snapshotId,
+        IndexBuildRequest request)
+    {
+        using var transaction = connection.BeginTransaction();
+        foreach (var file in request.LooseContentFiles
+                     .OrderBy(item => item.LogicalPath, StringComparer.OrdinalIgnoreCase))
+        {
+            using var insertFile = connection.CreateCommand();
+            insertFile.Transaction = transaction;
+            insertFile.CommandText = """
+                INSERT INTO loose_content_files(
+                    snapshot_id, logical_path, physical_path, source_mod, effective_priority,
+                    source_kind, file_length, last_write_utc, sha256, parse_status, warnings, entry_count)
+                VALUES ($snapshot, $logical, $physical, $source, $priority,
+                        $kind, $length, $write, $sha, $status, $warnings, $count);
+                SELECT last_insert_rowid();
+                """;
+            insertFile.Parameters.AddWithValue("$snapshot", snapshotId);
+            insertFile.Parameters.AddWithValue("$logical", file.LogicalPath);
+            insertFile.Parameters.AddWithValue("$physical", file.PhysicalPath);
+            insertFile.Parameters.AddWithValue("$source", file.SourceMod);
+            insertFile.Parameters.AddWithValue("$priority", file.EffectivePriority);
+            insertFile.Parameters.AddWithValue("$kind", file.SourceKind.ToString());
+            insertFile.Parameters.AddWithValue("$length", file.FileLength);
+            insertFile.Parameters.AddWithValue("$write", file.LastWriteUtc.ToString("O", CultureInfo.InvariantCulture));
+            insertFile.Parameters.AddWithValue("$sha", file.Sha256 is null ? DBNull.Value : file.Sha256);
+            insertFile.Parameters.AddWithValue("$status", file.Warnings.Count == 0 ? "parsed" : "partiallyParsed");
+            insertFile.Parameters.AddWithValue("$warnings", file.Warnings.Count == 0
+                ? DBNull.Value : JsonSerializer.Serialize(file.Warnings));
+            insertFile.Parameters.AddWithValue("$count", file.Entries.Count);
+            var fileId = (long)insertFile.ExecuteScalar()!;
+
+            using var insertEntry = connection.CreateCommand();
+            insertEntry.Transaction = transaction;
+            insertEntry.CommandText = """
+                INSERT INTO loose_content_entries(
+                    file_id, semantic_path, text, normalized_text, context, line_number,
+                    encoding_evidence, ambiguous, is_heuristic)
+                VALUES ($file, $semantic, $text, $normalized, $context, $line,
+                        $encoding, $ambiguous, $heuristic);
+                """;
+            insertEntry.Parameters.Add("$file", SqliteType.Integer);
+            insertEntry.Parameters.Add("$semantic", SqliteType.Text);
+            insertEntry.Parameters.Add("$text", SqliteType.Text);
+            insertEntry.Parameters.Add("$normalized", SqliteType.Text);
+            insertEntry.Parameters.Add("$context", SqliteType.Text);
+            insertEntry.Parameters.Add("$line", SqliteType.Integer);
+            insertEntry.Parameters.Add("$encoding", SqliteType.Text);
+            insertEntry.Parameters.Add("$ambiguous", SqliteType.Integer);
+            insertEntry.Parameters.Add("$heuristic", SqliteType.Integer);
+            insertEntry.Prepare();
+            foreach (var entry in file.Entries)
+            {
+                insertEntry.Parameters["$file"].Value = fileId;
+                insertEntry.Parameters["$semantic"].Value = entry.SemanticPath;
+                insertEntry.Parameters["$text"].Value = entry.Text;
+                insertEntry.Parameters["$normalized"].Value =
+                    (object?)TextNormalizer.Normalize(entry.Text) ?? DBNull.Value;
+                insertEntry.Parameters["$context"].Value = entry.Context;
+                insertEntry.Parameters["$line"].Value = entry.LineNumber;
+                insertEntry.Parameters["$encoding"].Value = entry.EncodingEvidence.ToString();
+                insertEntry.Parameters["$ambiguous"].Value = entry.Ambiguous ? 1 : 0;
+                insertEntry.Parameters["$heuristic"].Value = entry.IsHeuristic ? 1 : 0;
+                insertEntry.ExecuteNonQuery();
+            }
+        }
+
+        transaction.Commit();
     }
 
     private static void ReplaceGameSettings(
@@ -481,6 +586,7 @@ public sealed class SqliteIndexBuilder(
                 engine_game_setting_catalog_path = $catalogPath,
                 runtime_executable_path = $runtimePath,
                 engine_game_setting_warnings = $catalogWarnings,
+                loose_content_warnings = $looseWarnings,
                 status = 'building'
             WHERE id = $id;
             """;
@@ -499,6 +605,8 @@ public sealed class SqliteIndexBuilder(
             ? DBNull.Value : request.RuntimeExecutablePath);
         update.Parameters.AddWithValue("$catalogWarnings", request.EngineGameSettingWarnings.Count == 0
             ? DBNull.Value : JsonSerializer.Serialize(request.EngineGameSettingWarnings));
+        update.Parameters.AddWithValue("$looseWarnings", request.LooseContentWarnings.Count == 0
+            ? DBNull.Value : JsonSerializer.Serialize(request.LooseContentWarnings));
         update.Parameters.AddWithValue("$id", snapshotId);
         update.ExecuteNonQuery();
         return snapshotId;

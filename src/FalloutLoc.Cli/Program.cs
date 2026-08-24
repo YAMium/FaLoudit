@@ -8,6 +8,7 @@ using FalloutLoc.Analysis.Models;
 using FalloutLoc.Backends.Abstractions;
 using FalloutLoc.Backends.Encoding;
 using FalloutLoc.Backends.Engine;
+using FalloutLoc.Backends.Loose;
 using FalloutLoc.Backends.Models;
 using FalloutLoc.Backends.Mutagen;
 using FalloutLoc.Core.Configuration;
@@ -292,6 +293,20 @@ public static class Program
                     ? $"Extracted {gameSettings.EngineSettings.Count} string settings; " +
                       $"found {gameSettings.PostPluginSettings.Count} post-plugin INI assignment(s)."
                     : "Engine GameSetting catalog is unavailable; plugin indexing remains usable.");
+
+            try
+            {
+                var looseContent = DiscoverLooseContentFiles(result, guard, sourceFileSystem);
+                AddCheck(
+                    checks,
+                    "loose-content",
+                    true,
+                    $"Resolved {looseContent.Files.Count} MO2-winning NVSE script/INI file(s) without reading disabled mods.");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                AddCheck(checks, "loose-content", false, exception.Message);
+            }
         }
 
         var writeGuardPassed = false;
@@ -368,6 +383,7 @@ public static class Program
             PhysicalProviders = current.Providers,
             EngineGameSettings = current.EngineGameSettings,
             PostPluginGameSettings = current.PostPluginGameSettings,
+            LooseContentFiles = current.LooseContentFiles,
             EngineGameSettingCatalogStatus = current.EngineGameSettingCatalogStatus,
             EngineGameSettingCatalogPath = current.EngineGameSettingCatalogPath,
             RuntimeExecutablePath = current.RuntimeExecutablePath,
@@ -398,7 +414,8 @@ public static class Program
                     Warnings = IndexWarnings(
                         freshness.Snapshot?.FailedPlugins ?? 0,
                         freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
-                        freshness.Snapshot?.EngineGameSettingWarnings),
+                        freshness.Snapshot?.EngineGameSettingWarnings,
+                        freshness.Snapshot?.LooseContentWarnings),
                 });
             }
             else
@@ -411,6 +428,15 @@ public static class Program
         }
 
         IProgress<IndexProgress>? progress = json ? null : new ConsoleIndexProgress();
+        var extractedLooseContent = ExtractLooseContentFiles(
+            current.LooseContentFiles,
+            current.Configuration,
+            new SourceFileSystem(current.Guard));
+        request = request with
+        {
+            LooseContentFiles = extractedLooseContent.Files,
+            LooseContentWarnings = extractedLooseContent.Warnings,
+        };
         var result = builder.Build(request, progress);
         SaveIndexHistory(workspace, new IndexHistoryEntry
         {
@@ -440,7 +466,8 @@ public static class Program
                 Warnings = IndexWarnings(
                     result.FailedPlugins,
                     result.PartiallyParsedPlugins,
-                    result.EngineGameSettingWarnings),
+                    result.EngineGameSettingWarnings,
+                    result.LooseContentWarnings),
             });
         }
         else
@@ -451,7 +478,12 @@ public static class Program
             Console.WriteLine($"Records: {result.Records}; strings: {result.Strings}; content sources: {result.Contents}; duration: {result.Duration}");
             Console.WriteLine($"Engine GameSettings: {result.EngineGameSettings} ({result.EngineGameSettingCatalogStatus}); " +
                 $"post-plugin overrides: {result.PostPluginGameSettingOverrides}");
+            Console.WriteLine($"Loose content: {result.LooseContentFiles} files; {result.LooseContentEntries} searchable entries");
             foreach (var warning in result.EngineGameSettingWarnings)
+            {
+                Console.WriteLine($"Warning: {warning}");
+            }
+            foreach (var warning in result.LooseContentWarnings)
             {
                 Console.WriteLine($"Warning: {warning}");
             }
@@ -574,8 +606,8 @@ public static class Program
         }
         else if (page.Items.Count == 0)
         {
-            Console.WriteLine("No matching indexed record content.");
-            Console.WriteLine("Manual read-only search may still be required for compiled scripts, loose files, archives, or executable strings outside the GameSetting catalog.");
+            Console.WriteLine("No matching indexed plugin or loose-file content.");
+            Console.WriteLine("Manual read-only search may still be required for compiled scripts, archives, or executable strings outside the GameSetting catalog.");
         }
         else
         {
@@ -583,8 +615,12 @@ public static class Program
             foreach (var match in page.Items)
             {
                 Console.WriteLine($"{(match.IsWinningOverride ? "WIN" : "OLD")} {match.FormKey} {match.RecordType} {match.EditorId ?? "-"}");
-                Console.WriteLine($"  {match.PluginName} [{match.LoadOrderIndex}] <- {match.SourceMod}");
-                Console.WriteLine($"  {match.SourceKind} {match.SemanticPath}; context {match.ContextStart}..{match.ContextStart + match.Context.Length}/{match.ContentLength}");
+                Console.WriteLine(match.FormKey.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+                    ? $"  {match.PhysicalPath} <- {match.SourceMod} (MO2 priority {match.EffectivePriority})"
+                    : $"  {match.PluginName} [{match.LoadOrderIndex}] <- {match.SourceMod}");
+                Console.WriteLine($"  {match.SourceKind} {match.SemanticPath}" +
+                    (match.LineNumber is null ? string.Empty : $"; line {match.LineNumber}") +
+                    $"; context {match.ContextStart}..{match.ContextStart + match.Context.Length}/{match.ContentLength}");
                 Console.WriteLine(SanitizeConsoleContent(match.Context));
             }
 
@@ -719,7 +755,8 @@ public static class Program
                     Warnings = IndexWarnings(
                         freshness.Snapshot?.FailedPlugins ?? 0,
                         freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
-                        freshness.Snapshot?.EngineGameSettingWarnings),
+                        freshness.Snapshot?.EngineGameSettingWarnings,
+                        freshness.Snapshot?.LooseContentWarnings),
                 });
             }
             else
@@ -778,7 +815,7 @@ public static class Program
                     },
                 manualFallbackRecommended,
                 manualFallbackReason = manualFallbackRecommended
-                    ? "The current content index covers saved SCPT source and validated string GameSettings; compiled scripts, loose files, archives, and other executable strings may still require a manual read-only search."
+                    ? "The current content index covers saved SCPT source, MO2-winning loose NVSE scripts and INI values, and validated string GameSettings; compiled scripts, archives, and other executable strings may still require a manual read-only search."
                     : null,
             };
         }
@@ -814,7 +851,8 @@ public static class Program
                 Warnings = IndexWarnings(
                     freshness.Snapshot?.FailedPlugins ?? 0,
                     freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
-                    freshness.Snapshot?.EngineGameSettingWarnings),
+                    freshness.Snapshot?.EngineGameSettingWarnings,
+                    freshness.Snapshot?.LooseContentWarnings),
             });
         }
         else
@@ -832,16 +870,20 @@ public static class Program
 
             if (contentPage?.Items.Count > 0)
             {
-                Console.WriteLine("No localization-field match. Candidate untrusted record content requires semantic GPT review:");
+                Console.WriteLine("No localization-field match. Candidate untrusted plugin/file content requires semantic GPT review:");
                 foreach (var candidate in contentPage.Items)
                 {
-                    Console.WriteLine($"{(candidate.IsWinningOverride ? "WIN" : "OLD")} {candidate.FormKey} {candidate.EditorId ?? "-"} in {candidate.PluginName} <- {candidate.SourceMod}");
+                    Console.WriteLine(candidate.FormKey.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+                        ? $"WIN {candidate.FormKey} <- {candidate.SourceMod} (MO2 priority {candidate.EffectivePriority})"
+                        : $"{(candidate.IsWinningOverride ? "WIN" : "OLD")} {candidate.FormKey} {candidate.EditorId ?? "-"} in {candidate.PluginName} <- {candidate.SourceMod}");
+                    Console.WriteLine($"  {candidate.SourceKind} {candidate.SemanticPath}" +
+                        (candidate.LineNumber is null ? string.Empty : $"; line {candidate.LineNumber}"));
                     Console.WriteLine(SanitizeConsoleContent(candidate.Context));
                 }
             }
             else if (manualFallbackRecommended)
             {
-                Console.WriteLine("No indexed content match. Continue with a manual read-only search of compiled scripts, loose files, archives, and executable strings outside the GameSetting catalog.");
+                Console.WriteLine("No indexed content match. Continue with a manual read-only search of compiled scripts, archives, and executable strings outside the GameSetting catalog.");
             }
         }
         return 0;
@@ -1445,6 +1487,11 @@ public static class Program
             discovery,
             guard,
             sourceFileSystem);
+        var looseContent = DiscoverLooseContentFiles(
+            discovery,
+            guard,
+            sourceFileSystem);
+        providers.AddRange(looseContent.Providers);
 
         return new CurrentIndexInputs(
             configuration,
@@ -1458,13 +1505,138 @@ public static class Program
             gameSettings.CatalogPath,
             gameSettings.RuntimeExecutablePath,
             gameSettings.Warnings,
+            looseContent.Files,
             ComputeFingerprint(
                 configuration,
                 discovery,
                 plugins,
                 providers,
                 gameSettings,
+                looseContent.Files,
                 guard));
+    }
+
+    private static LooseContentDiscovery DiscoverLooseContentFiles(
+        InstallationDiscoveryResult discovery,
+        ReadOnlySourceGuard guard,
+        SourceFileSystem sourceFileSystem)
+    {
+        var resolver = new Mo2FileResolver(sourceFileSystem);
+        var resolutions = new Dictionary<string, (PhysicalFileResolution Resolution, RecordContentSourceKind Kind)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        Add(resolver.ResolveDirectoryFiles(
+            ".", ".ini", discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.IniValue);
+        Add(resolver.ResolveDirectoryFiles(
+            Path.Combine("NVSE", "Plugins", "Scripts"), ".txt",
+            discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.LooseScript);
+        Add(resolver.ResolveDirectoryFiles(
+            Path.Combine("NVSE", "user_defined_functions"), ".txt",
+            discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile),
+            RecordContentSourceKind.LooseScript);
+
+        var files = new List<IndexLooseContentFileInput>(resolutions.Count);
+        var providers = new List<IndexPhysicalProviderInput>();
+        foreach (var item in resolutions.Values
+                     .OrderBy(item => item.Resolution.LogicalPath, StringComparer.OrdinalIgnoreCase))
+        {
+            var winner = item.Resolution.Winner;
+            if (winner is null)
+            {
+                continue;
+            }
+
+            foreach (var provider in item.Resolution.Providers)
+            {
+                var readable = guard.EnsureReadableSource(provider.PhysicalPath);
+                var info = new FileInfo(readable);
+                providers.Add(new IndexPhysicalProviderInput
+                {
+                    LogicalPath = item.Resolution.LogicalPath,
+                    SourceKind = provider.SourceKind.ToString(),
+                    SourceName = provider.SourceName,
+                    EffectivePriority = provider.EffectivePriority,
+                    ProfileLine = provider.ProfileLine,
+                    PhysicalPath = provider.PhysicalPath,
+                    IsWinner = ReferenceEquals(provider, winner),
+                    FileLength = info.Length,
+                    LastWriteUtc = info.LastWriteTimeUtc,
+                });
+            }
+
+            var winnerInfo = new FileInfo(guard.EnsureReadableSource(winner.PhysicalPath));
+            files.Add(new IndexLooseContentFileInput
+            {
+                LogicalPath = item.Resolution.LogicalPath,
+                PhysicalPath = winner.PhysicalPath,
+                SourceMod = winner.SourceName,
+                EffectivePriority = winner.EffectivePriority,
+                SourceKind = item.Kind,
+                FileLength = winnerInfo.Length,
+                LastWriteUtc = winnerInfo.LastWriteTimeUtc,
+            });
+        }
+
+        return new LooseContentDiscovery(files, providers);
+
+        void Add(
+            IReadOnlyDictionary<string, PhysicalFileResolution> candidates,
+            RecordContentSourceKind kind)
+        {
+            foreach (var item in candidates)
+            {
+                resolutions[item.Key] = (item.Value, kind);
+            }
+        }
+    }
+
+    private static LooseContentExtraction ExtractLooseContentFiles(
+        IReadOnlyList<IndexLooseContentFileInput> files,
+        ProjectConfiguration configuration,
+        SourceFileSystem sourceFileSystem)
+    {
+        var pair = configuration.RequireLanguagePair();
+        var extractor = new LooseContentExtractor(new StrictPluginStringDecoder(pair.Source, pair.Target));
+        var extracted = new List<IndexLooseContentFileInput>(files.Count);
+        var warnings = new List<string>();
+        foreach (var file in files)
+        {
+            try
+            {
+                var result = extractor.Extract(
+                    file.LogicalPath,
+                    file.SourceKind,
+                    sourceFileSystem.ReadAllBytes(file.PhysicalPath));
+                var fileWarnings = result.Warnings
+                    .Select(warning => $"{file.LogicalPath}: {warning}")
+                    .ToArray();
+                warnings.AddRange(fileWarnings);
+                extracted.Add(file with
+                {
+                    Entries = result.Entries.Select(entry => new IndexLooseContentEntryInput
+                    {
+                        SemanticPath = entry.SemanticPath,
+                        Text = entry.Text,
+                        Context = entry.Context,
+                        LineNumber = entry.LineNumber,
+                        EncodingEvidence = entry.EncodingEvidence,
+                        Ambiguous = entry.Ambiguous,
+                        IsHeuristic = entry.IsHeuristic,
+                    }).ToArray(),
+                    Warnings = fileWarnings,
+                });
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                var warning = $"{file.LogicalPath}: read failed: {exception.Message}";
+                warnings.Add(warning);
+                extracted.Add(file with { Warnings = [warning] });
+            }
+        }
+
+        return new LooseContentExtraction(extracted, warnings);
     }
 
     private static GameSettingInputs LoadGameSettingInputs(
@@ -1703,6 +1875,8 @@ public static class Program
             status.EngineGameSettingCatalogStatus,
             status.EngineGameSettingCatalogPath,
             status.RuntimeExecutablePath,
+            status.LooseContentFiles,
+            status.LooseContentEntries,
         },
     };
 
@@ -1731,6 +1905,8 @@ public static class Program
                 freshness.Snapshot.EngineGameSettingCatalogStatus,
                 freshness.Snapshot.EngineGameSettingCatalogPath,
                 freshness.Snapshot.RuntimeExecutablePath,
+                freshness.Snapshot.LooseContentFiles,
+                freshness.Snapshot.LooseContentEntries,
             },
     };
 
@@ -1748,13 +1924,15 @@ public static class Program
             Warnings = IndexWarnings(
                 status.FailedPlugins,
                 status.PartiallyParsedPlugins,
-                status.EngineGameSettingWarnings),
+                status.EngineGameSettingWarnings,
+                status.LooseContentWarnings),
         };
 
     private static IReadOnlyList<string> IndexWarnings(
         int failedPlugins,
         int partiallyParsedPlugins = 0,
-        IEnumerable<string>? additionalWarnings = null)
+        IEnumerable<string>? additionalWarnings = null,
+        IEnumerable<string>? looseContentWarnings = null)
     {
         var warnings = new List<string>();
         if (failedPlugins > 0)
@@ -1772,6 +1950,11 @@ public static class Program
             warnings.AddRange(additionalWarnings);
         }
 
+        if (looseContentWarnings is not null)
+        {
+            warnings.AddRange(looseContentWarnings);
+        }
+
         return warnings.Distinct(StringComparer.Ordinal).ToArray();
     }
 
@@ -1781,6 +1964,7 @@ public static class Program
         IEnumerable<IndexPluginInput> plugins,
         IEnumerable<IndexPhysicalProviderInput> providers,
         GameSettingInputs gameSettings,
+        IEnumerable<IndexLooseContentFileInput> looseContentFiles,
         ReadOnlySourceGuard guard)
     {
         var value = new StringBuilder("falloutloc-profile-fingerprint-v2\n")
@@ -1836,6 +2020,18 @@ public static class Program
                 .Append(setting.Ambiguous).Append('\n');
         }
 
+        value.Append("loose-content-extractor=").Append(LooseContentExtractor.Version).Append('\n');
+        foreach (var file in looseContentFiles.OrderBy(file => file.LogicalPath, StringComparer.OrdinalIgnoreCase))
+        {
+            value.Append(file.LogicalPath).Append('\0')
+                .Append(file.SourceKind).Append('\0')
+                .Append(file.PhysicalPath).Append('\0')
+                .Append(file.SourceMod).Append('\0')
+                .Append(file.EffectivePriority).Append('\0')
+                .Append(file.FileLength).Append('\0')
+                .Append(file.LastWriteUtc.Ticks).Append('\n');
+        }
+
         foreach (var executable in new[] { gameSettings.CatalogPath, gameSettings.RuntimeExecutablePath }
                      .Where(path => path is not null)
                      .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
@@ -1888,7 +2084,8 @@ public static class Program
         var warnings = IndexWarnings(
                 freshness.Snapshot?.FailedPlugins ?? 0,
                 freshness.Snapshot?.PartiallyParsedPlugins ?? 0,
-                freshness.Snapshot?.EngineGameSettingWarnings)
+                freshness.Snapshot?.EngineGameSettingWarnings,
+                freshness.Snapshot?.LooseContentWarnings)
             .Concat(operationallyHealthy || freshness.Snapshot is null
                 ? []
                 : new[] { $"SQLite quick_check reported an integrity problem: {integrity}" })
@@ -1931,6 +2128,8 @@ public static class Program
             Console.WriteLine($"Engine GameSettings: {freshness.Snapshot.EngineGameSettings} " +
                 $"({freshness.Snapshot.EngineGameSettingCatalogStatus}); " +
                 $"post-plugin overrides: {freshness.Snapshot.PostPluginGameSettingOverrides}");
+            Console.WriteLine($"Loose content: {freshness.Snapshot.LooseContentFiles} files; " +
+                $"{freshness.Snapshot.LooseContentEntries} searchable entries");
         }
 
         foreach (var warning in warnings)
@@ -2151,6 +2350,7 @@ public static class Program
         string? EngineGameSettingCatalogPath,
         string? RuntimeExecutablePath,
         IReadOnlyList<string> EngineGameSettingWarnings,
+        IReadOnlyList<IndexLooseContentFileInput> LooseContentFiles,
         string Fingerprint);
 
     private sealed record GameSettingInputs(
@@ -2159,6 +2359,14 @@ public static class Program
         string CatalogStatus,
         string? CatalogPath,
         string? RuntimeExecutablePath,
+        IReadOnlyList<string> Warnings);
+
+    private sealed record LooseContentDiscovery(
+        IReadOnlyList<IndexLooseContentFileInput> Files,
+        IReadOnlyList<IndexPhysicalProviderInput> Providers);
+
+    private sealed record LooseContentExtraction(
+        IReadOnlyList<IndexLooseContentFileInput> Files,
         IReadOnlyList<string> Warnings);
 
     private sealed record IndexHistoryEntry

@@ -1049,3 +1049,30 @@ The effective value trace is resolved by EditorID in this order:
 INI bytes use the same reversible configured-code-page recovery policy as
 plugin strings. Engine catalog and post-plugin INI inputs participate in the
 index freshness fingerprint. SQLite schema 5 is rebuilt atomically as schema 6.
+
+---
+
+# 41. MO2-winning loose content (version 0.4.2)
+
+The fallback content index includes read-only evidence from active virtual Data
+files outside ESM/ESP:
+
+1. quoted literals in MO2-winning `NVSE/Plugins/Scripts/**/*.txt`;
+2. quoted literals in MO2-winning `NVSE/user_defined_functions/**/*.txt`;
+3. values from MO2-winning virtual Data `*.ini` files.
+
+Loose content uses `file:<logical Data path>` identities and must never be
+presented as a plugin FormID. Store the physical winner, source MO2 mod,
+effective priority, semantic line or INI section/key, line number, configured
+encoding evidence, and bounded source context. Preserve the complete physical
+provider chain through the general MO2 file resolver.
+
+INI comments, MO2 `meta.ini`, `.mohidden` trees, and Windows `desktop.ini` are
+not runtime content and are excluded. Apply a bounded file-size and binary-file
+guard. Never execute a script or load an INI through a game/plugin runtime.
+
+Every result is untrusted static evidence requiring semantic GPT review. A
+matching literal or value does not prove that the code path executes or that a
+consumer uses that key. Compiled-only script bytecode and BSA content remain a
+manual read-only fallback. Loose metadata participates in freshness detection;
+SQLite schema 6 is rebuilt atomically as schema 7.

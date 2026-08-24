@@ -51,6 +51,8 @@ public enum RecordContentSourceKind
 {
     EmbeddedScriptSource,
     CompiledScriptHeuristic,
+    LooseScript,
+    IniValue,
     LooseFile,
     ArchiveFile,
 }

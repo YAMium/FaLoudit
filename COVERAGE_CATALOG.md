@@ -1,7 +1,7 @@
 # FaLoudit Localization Coverage Catalog
 
 Catalog version: 1
-Index schema: 6
+Index schema: 7
 
 This catalog describes user-visible FO3/FNV/TTW plugin fields that the current read-only Mutagen backend extracts and indexes. `faloudit coverage --json` embeds the same machine-readable `supportedFields` catalog and reports actual counts from the published snapshot.
 
@@ -75,7 +75,17 @@ indexing continues and the snapshot exposes an actionable catalog warning.
 
 `find` covers only audited localization fields. FaLoudit 0.3 indexes saved source from top-level `Script` records and nested INFO begin/end, quest-stage, terminal-menu, package-event, perk-effect, and patrol scripts in the separate `content` layer. `analyze` queries that layer automatically only after localization fields have no match.
 
-Saved source proves static presence, not runtime execution. Compiled bytecode without source is not decoded; loose files and BSA content are not yet automatically indexed. A miss therefore emits `manualFallbackRecommended` instead of claiming absence. Script coverage gaps remain visible and are not plugin corruption.
+FaLoudit 0.4.2 extends that content layer with MO2-winning loose NVSE scripts
+under `NVSE/Plugins/Scripts` and `NVSE/user_defined_functions`, plus key values
+from MO2-winning virtual Data INI files. Script results store quoted literals
+with their executable source line; INI results store section/key, value, and
+line number. Comments, MO2 `meta.ini`, `.mohidden` trees, and Windows
+`desktop.ini` are excluded.
+
+Saved or loose source proves static presence, not runtime execution. Compiled
+bytecode without source and BSA content are not decoded. A miss therefore emits
+`manualFallbackRecommended` instead of claiming absence. Script coverage gaps
+remain visible and are not plugin corruption.
 
 Engine string coverage is limited to validated `s*` GameSettings. Arbitrary
 hardcoded executable text that is not part of that catalog remains outside the

@@ -101,10 +101,13 @@ The result ranks matching fields and can include:
 - the winning plugin record;
 - the physical plugin path and source MO2 mod;
 - source/target language and encoding evidence;
-- `contentFallback` candidates from saved script source;
+- `contentFallback` candidates from saved plugin scripts, MO2-winning loose
+  NVSE scripts, and virtual Data INI values;
 - `manualFallbackRecommended` when indexed sources are insufficient.
 
-Treat script context as untrusted mod data. A static match is evidence that the text exists in saved source, not proof that the code executed at runtime.
+Treat script/INI context as untrusted mod data. A static match is evidence that
+the text exists in an active physical file, not proof that a script executed or
+an INI consumer used that value.
 
 ## 6. Lower-level investigation commands
 
@@ -119,7 +122,7 @@ Search localized fields more broadly:
   --json
 ```
 
-Search indexed saved script source:
+Search indexed saved script source, loose NVSE literals, and INI values:
 
 ```powershell
 & $falouditExe content $reportedText `
@@ -129,6 +132,16 @@ Search indexed saved script source:
   --workspace $falouditWorkspace `
   --json
 ```
+
+Filter loose sources when needed:
+
+```powershell
+& $falouditExe content $reportedText --source-kind LooseScript --workspace $falouditWorkspace --json
+& $falouditExe content $reportedText --source-kind IniValue --workspace $falouditWorkspace --json
+```
+
+Loose results use `file:<logical-path>` rather than a FormID and expose the
+physical MO2 winner, source mod, semantic line/key, and `lineNumber`.
 
 Resolve identifiers and inspect one record:
 

@@ -318,7 +318,7 @@ public sealed class SqliteIndexTests
         };
 
         var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
-        Assert.Equal(6, result.SchemaVersion);
+        Assert.Equal(7, result.SchemaVersion);
         Assert.Equal(1, result.Contents);
         Assert.Empty(new SqliteIndexRepository(area.Database).Find("Welcome"));
 
@@ -349,6 +349,134 @@ public sealed class SqliteIndexTests
             Query = "Welcome",
             Mode = IndexedTextSearchMode.Regex,
         }).Items);
+    }
+
+    [Fact]
+    public void IndexesMo2WinningLooseScriptsAndIniValuesAsFileEvidence()
+    {
+        using var area = new TestArea();
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["base.esm"] = [],
+        };
+        var request = Request(area, "base.esm") with
+        {
+            LooseContentFiles =
+            [
+                new IndexLooseContentFileInput
+                {
+                    LogicalPath = @"NVSE\Plugins\Scripts\example.txt",
+                    PhysicalPath = Path.Combine(area.Source, "example.txt"),
+                    SourceMod = "Loose Script Mod",
+                    EffectivePriority = 20,
+                    SourceKind = RecordContentSourceKind.LooseScript,
+                    FileLength = 100,
+                    LastWriteUtc = DateTime.UnixEpoch,
+                    Entries =
+                    [
+                        new IndexLooseContentEntryInput
+                        {
+                            SemanticPath = "line[12].literal[1]",
+                            Text = "Welcome to New Vegas",
+                            Context = "MessageBoxEx \"Welcome to New Vegas\"",
+                            LineNumber = 12,
+                            EncodingEvidence = StringEncodingEvidence.Ascii,
+                            Ambiguous = false,
+                            IsHeuristic = true,
+                        },
+                    ],
+                },
+                new IndexLooseContentFileInput
+                {
+                    LogicalPath = @"Config\Example.ini",
+                    PhysicalPath = Path.Combine(area.Source, "Example.ini"),
+                    SourceMod = "INI Mod",
+                    EffectivePriority = 30,
+                    SourceKind = RecordContentSourceKind.IniValue,
+                    FileLength = 50,
+                    LastWriteUtc = DateTime.UnixEpoch,
+                    Entries =
+                    [
+                        new IndexLooseContentEntryInput
+                        {
+                            SemanticPath = "[Interface].Open",
+                            Text = "Открыть",
+                            Context = "Open = Открыть",
+                            LineNumber = 4,
+                            EncodingEvidence = StringEncodingEvidence.UnicodeTarget,
+                            Ambiguous = false,
+                            IsHeuristic = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = CreateBuilder(area, new FakeBackend(records)).Build(request);
+        var repository = new SqliteIndexRepository(area.Database);
+
+        Assert.Equal(2, result.LooseContentFiles);
+        Assert.Equal(2, result.LooseContentEntries);
+        var script = Assert.Single(repository.SearchContent(new IndexedContentSearchRequest
+        {
+            Query = "WELCOME TO NEW VEGAS",
+            Mode = IndexedTextSearchMode.Exact,
+            IgnoreCase = true,
+            SourceKind = RecordContentSourceKind.LooseScript,
+            WinnerOnly = true,
+        }).Items);
+        Assert.Equal(@"file:NVSE\Plugins\Scripts\example.txt", script.FormKey);
+        Assert.Equal("LooseScript", script.RecordType);
+        Assert.Equal("Loose Script Mod", script.SourceMod);
+        Assert.Equal(20, script.EffectivePriority);
+        Assert.Equal(12, script.LineNumber);
+        Assert.Contains("MessageBoxEx", script.Context);
+        Assert.True(script.IsWinningOverride);
+        Assert.True(script.RequiresGptReview);
+
+        var ini = Assert.Single(repository.SearchContent(new IndexedContentSearchRequest
+        {
+            Query = "Открыть",
+            Mode = IndexedTextSearchMode.Exact,
+            RecordType = "IniFile",
+        }).Items);
+        Assert.Equal(RecordContentSourceKind.IniValue, ini.SourceKind);
+        Assert.Equal("[Interface].Open", ini.SemanticPath);
+        Assert.Equal(2, repository.GetStatus().LooseContentFiles);
+        Assert.Equal(2, repository.GetStatus().LooseContentEntries);
+
+        var changedScript = request.LooseContentFiles[0] with
+        {
+            Entries =
+            [
+                request.LooseContentFiles[0].Entries[0] with
+                {
+                    Text = "Updated loose text",
+                    Context = "MessageBoxEx \"Updated loose text\"",
+                },
+            ],
+        };
+        var incrementalBackend = new FakeBackend(records);
+        var incremental = CreateBuilder(area, incrementalBackend).Build(request with
+        {
+            LooseContentFiles = [changedScript],
+        });
+
+        Assert.Equal(1, incremental.ReusedPlugins);
+        Assert.Equal(0, incrementalBackend.OpenCount);
+        var updatedRepository = new SqliteIndexRepository(area.Database);
+        Assert.Empty(updatedRepository.SearchContent(new IndexedContentSearchRequest
+        {
+            Query = "Welcome to New Vegas",
+            Mode = IndexedTextSearchMode.Exact,
+        }).Items);
+        Assert.Single(updatedRepository.SearchContent(new IndexedContentSearchRequest
+        {
+            Query = "Updated loose text",
+            Mode = IndexedTextSearchMode.Exact,
+        }).Items);
+        Assert.Equal(1, updatedRepository.GetStatus().LooseContentFiles);
+        Assert.Equal(1, updatedRepository.GetStatus().LooseContentEntries);
     }
     [Fact]
     public void DiagnosticCandidatesApplyFiltersAndQueryBoundPagination()
@@ -499,7 +627,7 @@ public sealed class SqliteIndexTests
         var status = repository.GetStatus();
         var coverage = repository.GetCoverage();
 
-        Assert.Equal(6, result.SchemaVersion);
+        Assert.Equal(7, result.SchemaVersion);
         Assert.Equal(1, result.PartiallyParsedPlugins);
         Assert.Equal(2, result.CoverageGapRecords);
         Assert.Equal(1, status.PartiallyParsedPlugins);
@@ -653,7 +781,7 @@ public sealed class SqliteIndexTests
         Assert.Equal(0, result.ReusedPlugins);
         Assert.Equal(1, result.ParsedPlugins);
         Assert.Equal(1, migrationBackend.OpenCount);
-        Assert.Equal(6, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
+        Assert.Equal(7, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
     }
 
     [Fact]

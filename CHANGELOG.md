@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.2 — 2026-08-24
+
+- Added MO2-aware indexing of winning loose NVSE scripts from
+  `NVSE/Plugins/Scripts` and `NVSE/user_defined_functions`.
+- Added searchable values from MO2-winning virtual Data INI files while
+  excluding comments, `meta.ini`, `.mohidden` trees, and Windows `desktop.ini`.
+- Added synthetic `file:<logical-path>` content identities with physical path,
+  source mod, MO2 priority, semantic key/line, encoding evidence, and bounded
+  untrusted context for GPT review.
+- Preserved CP1250/1251/1252/1254 and unmarked UTF-8 recovery for loose text
+  without executing scripts or loading INIs.
+- Advanced the SQLite index to schema 7 and included loose-file metadata and
+  extractor version in freshness fingerprints.
+
 ## 0.4.1 — 2026-08-23
 
 - Added local read-only extraction of hardcoded string GameSettings from the

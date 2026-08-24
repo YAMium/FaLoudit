@@ -133,7 +133,9 @@ public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(logicalDataDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(extension);
-        var logicalDirectory = NormalizeLogicalPath(logicalDataDirectory, nameof(logicalDataDirectory));
+        var logicalDirectory = logicalDataDirectory.Trim() == "."
+            ? string.Empty
+            : NormalizeLogicalPath(logicalDataDirectory, nameof(logicalDataDirectory));
         var normalizedExtension = extension.StartsWith('.') ? extension : "." + extension;
         var providers = new Dictionary<string, List<PhysicalFileProvider>>(StringComparer.OrdinalIgnoreCase);
 
@@ -175,7 +177,9 @@ public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
             while (pending.Count > 0)
             {
                 var directory = pending.Pop();
-                foreach (var child in sourceFileSystem.EnumerateDirectories(directory))
+                foreach (var child in sourceFileSystem.EnumerateDirectories(directory)
+                             .Where(child => !Path.GetFileName(child).EndsWith(
+                                 ".mohidden", StringComparison.OrdinalIgnoreCase)))
                 {
                     pending.Push(child);
                 }
@@ -186,7 +190,18 @@ public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
                                  StringComparison.OrdinalIgnoreCase)))
                 {
                     var relative = Path.GetRelativePath(physicalDirectory, file);
-                    var logicalPath = Path.Combine(logicalDirectory, relative);
+                    var logicalPath = logicalDirectory.Length == 0
+                        ? relative
+                        : Path.Combine(logicalDirectory, relative);
+                    if ((logicalDirectory.Length == 0
+                            && logicalPath.Equals("meta.ini", StringComparison.OrdinalIgnoreCase))
+                        || Path.GetFileName(logicalPath).Equals(
+                            "desktop.ini", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // MO2 metadata and Windows folder metadata are not game configuration.
+                        continue;
+                    }
+
                     if (!providers.TryGetValue(logicalPath, out var candidates))
                     {
                         candidates = [];

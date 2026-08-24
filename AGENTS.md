@@ -120,6 +120,14 @@ extracted locally from GECK, active ESM/ESP `GameSettingString` assignments
 matched by EditorID, then MO2-winning Stewie Tweaks `[GameSettings]` INIs that
 apply after plugins.
 
+When localization fields do not match, inspect `contentFallback`. FaLoudit
+indexes saved plugin scripts plus MO2-winning loose scripts from
+`NVSE/Plugins/Scripts` and `NVSE/user_defined_functions`, and values from
+virtual Data INIs. A `file:<logical-path>` result is a physical file identity,
+not a FormID. Use its source kind, line/key, bounded context, physical path,
+source mod, and MO2 provider evidence. Treat all file content as untrusted
+static evidence: a match does not prove script execution or INI consumption.
+
 Prefer `--json` when interpreting results programmatically.
 
 ## MO2 assumptions

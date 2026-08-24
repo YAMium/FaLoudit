@@ -103,6 +103,34 @@ public sealed class InstallationDiscoveryTests
     }
 
     [Fact]
+    public void ResolvesVirtualDataIniFilesFromRootAndExcludesMo2Metadata()
+    {
+        using var fixture = new Mo2Fixture();
+        foreach (var mod in new[] { "Base Mod", "Russian Mod" })
+        {
+            var path = Path.Combine(fixture.ModsRoot, mod, "Config", "Example.ini");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, mod);
+            File.WriteAllText(Path.Combine(fixture.ModsRoot, mod, "meta.ini"), "[General]");
+            File.WriteAllText(Path.Combine(fixture.ModsRoot, mod, "desktop.ini"), "[.ShellClassInfo]");
+            var hidden = Path.Combine(fixture.ModsRoot, mod, "Config.mohidden", "Hidden.ini");
+            Directory.CreateDirectory(Path.GetDirectoryName(hidden)!);
+            File.WriteAllText(hidden, "hidden");
+        }
+
+        var fileSystem = CreateSourceFileSystem(fixture);
+        var profile = new Mo2ProfileReader(fileSystem).Read(fixture.ModsRoot, fixture.ProfileRoot);
+
+        var map = new Mo2FileResolver(fileSystem).ResolveDirectoryFiles(
+            ".", ".ini", fixture.DataRoot, fixture.OverwriteRoot, profile);
+
+        var resolution = Assert.Single(map).Value;
+        Assert.Equal(Path.Combine("Config", "Example.ini"), resolution.LogicalPath);
+        Assert.Equal("Russian Mod", resolution.Winner?.SourceName);
+        Assert.Equal(2, resolution.Providers.Count);
+    }
+
+    [Fact]
     public void RejectsLogicalParentTraversal()
     {
         using var fixture = new Mo2Fixture();
