@@ -1077,3 +1077,32 @@ matching literal or value does not prove that the code path executes or that a
 consumer uses that key. Compiled-only script bytecode and BSA content remain a
 manual read-only fallback. Loose metadata participates in freshness detection;
 SQLite schema 6 is rebuilt atomically as schema 7.
+
+---
+
+# 42. MO2-winning UI XML text (version 0.4.3)
+
+The loose-content fallback includes literal text nodes containing at least one
+Unicode letter from MO2-winning virtual Data `Menus/**/*.xml` files. Restrict
+the automatic scope to the Fallout 3/New Vegas menu tree; packaging XML such as
+`fomod` metadata is not runtime UI localization evidence.
+
+Bethesda menu XML is not guaranteed to be standards-compliant. The read-only
+extractor must tolerate undeclared game entities, custom element names such as
+`_VUI+RBCtitle`, and locally mismatched tags. It must not resolve external
+entities, load DTDs, execute UI code, or instantiate a game/editor runtime.
+Ignore comments, entity-only references, and numeric-only layout values. Decode
+standard XML entities and reuse configured single-byte/UTF recovery.
+
+Represent a match as `UiXmlText` / `UiXml` under the existing
+`file:<logical Data path>` identity. Store the semantic element path, physical
+winner, source mod, MO2 priority, line number, encoding evidence, bounded
+untrusted context, and complete physical provider chain. The provider chain
+establishes file precedence, not runtime visibility. A GPT reviewer may use a
+distinctive trait from the bounded context for a further read-only consumer
+reference search when needed.
+
+The generic schema-7 loose tables already represent this source kind. The
+extractor version and discovered XML provider metadata participate in the
+freshness fingerprint so existing workspaces rebuild without a database schema
+migration and can reuse unchanged plugin caches.

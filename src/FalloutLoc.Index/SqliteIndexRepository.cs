@@ -367,7 +367,12 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 UNION ALL
 
                 SELECT 'file:' || f.logical_path,
-                       CASE f.source_kind WHEN 'LooseScript' THEN 'LooseScript' ELSE 'IniFile' END,
+                       CASE f.source_kind
+                           WHEN 'LooseScript' THEN 'LooseScript'
+                           WHEN 'IniValue' THEN 'IniFile'
+                           WHEN 'UiXmlText' THEN 'UiXml'
+                           ELSE 'LooseFile'
+                       END,
                        NULL, f.logical_path, -1, f.physical_path, f.source_mod,
                        f.effective_priority,
                        e.semantic_path, f.source_kind, e.text, e.normalized_text,
@@ -428,6 +433,20 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                 IsHeuristic = reader.GetBoolean(15),
                 IsWinningOverride = reader.GetBoolean(16),
             });
+        }
+
+        reader.Close();
+        for (var index = 0; index < results.Count; index++)
+        {
+            if (!results[index].FormKey.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            results[index] = results[index] with
+            {
+                PhysicalProviders = GetPhysicalProviders(results[index].PluginName),
+            };
         }
 
         return CreatePage(results, request.Limit, offset, scope);

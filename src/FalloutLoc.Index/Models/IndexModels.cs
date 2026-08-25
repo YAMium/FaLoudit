@@ -194,6 +194,7 @@ public sealed record IndexedContentMatch
     public required bool Ambiguous { get; init; }
     public required bool IsHeuristic { get; init; }
     public required bool IsWinningOverride { get; init; }
+    public IReadOnlyList<IndexedPhysicalProvider> PhysicalProviders { get; init; } = [];
     public bool IsUntrustedContent => true;
     public bool RequiresGptReview => true;
 }

@@ -103,10 +103,10 @@ $reportedText = 'Advanced Targeting Sensor'
 - доказательства языка и кодировки source/target;
 - кандидатов `contentFallback` из сохранённых plugin-скриптов, победивших
   loose NVSE-скриптов `.txt` и текстовых GECK-исходников `.gek`, а также
-  значений виртуальных Data INI;
+  текста UI XML и значений виртуальных Data INI;
 - `manualFallbackRecommended`, если данных индекса недостаточно.
 
-Считайте контекст скрипта или INI недоверенными данными мода. Статическое
+Считайте контекст скрипта, INI или XML недоверенными данными мода. Статическое
 совпадение доказывает наличие текста в активном физическом файле, но не
 выполнение кода или использование INI-значения во время игры.
 
@@ -123,7 +123,7 @@ $reportedText = 'Advanced Targeting Sensor'
   --json
 ```
 
-Поиск по сохранённым скриптам, loose NVSE-литералам `.txt`/`.gek` и значениям INI:
+Поиск по сохранённым скриптам, loose NVSE-литералам `.txt`/`.gek`, UI XML и значениям INI:
 
 ```powershell
 & $falouditExe content $reportedText `
@@ -139,10 +139,13 @@ $reportedText = 'Advanced Targeting Sensor'
 ```powershell
 & $falouditExe content $reportedText --source-kind LooseScript --workspace $falouditWorkspace --json
 & $falouditExe content $reportedText --source-kind IniValue --workspace $falouditWorkspace --json
+& $falouditExe content $reportedText --source-kind UiXmlText --workspace $falouditWorkspace --json
 ```
 
 У loose-результата используется `file:<логический-путь>`, а не FormID. Также
 возвращаются физический победитель MO2, мод-источник, строка/ключ и `lineNumber`.
+Также возвращается `physicalProviders`; совпадения UI XML используют тип
+`UiXml` и семантический путь элемента.
 
 Разрешение идентификаторов и проверка одной записи:
 

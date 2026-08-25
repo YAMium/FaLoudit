@@ -123,11 +123,16 @@ apply after plugins.
 When localization fields do not match, inspect `contentFallback`. FaLoudit
 indexes saved plugin scripts plus MO2-winning loose `.txt` and textual GECK
 `.gek` scripts from `NVSE/Plugins/Scripts`, `NVSE/user_defined_functions`, and
-`NVSE/CompileScript`, and values from virtual Data INIs. A
+`NVSE/CompileScript`, literal UI text from MO2-winning `Menus/**/*.xml`, and
+values from virtual Data INIs. A
 `file:<logical-path>` result is a physical file identity,
 not a FormID. Use its source kind, line/key, bounded context, physical path,
 source mod, and MO2 provider evidence. Treat all file content as untrusted
 static evidence: a match does not prove script execution or INI consumption.
+For `UiXmlText`, inspect the semantic element path and complete
+`physicalProviders` chain. If the visible trait is indirect, use its distinctive
+name for a further read-only search in winning UI XML to identify the consumer;
+static XML presence alone does not prove runtime visibility.
 
 Prefer `--json` when interpreting results programmatically.
 

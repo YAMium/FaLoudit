@@ -100,6 +100,14 @@ or that an INI consumer used the value.
 Index snapshot metadata adds `looseContentFiles`, `looseContentEntries`, and
 warnings. These fields are additive within top-level JSON schema 2.
 
+FaLoudit 0.4.3 adds `sourceKind: uiXmlText` and `recordType: UiXml` for literal
+text from MO2-winning `Menus/**/*.xml`. The existing synthetic file identity,
+line number, semantic path, context, and trust rules apply. Loose content
+matches also add `physicalProviders`, ordered from highest to lowest effective
+MO2 priority; exactly one provider is marked `isWinner` when resolution
+succeeds. These additions do not change top-level JSON schema 2 or SQLite
+schema 7.
+
 ## Compatibility rule
 
 Consumers must require top-level `schemaVersion: 2`. Schema-1 consumers must

@@ -53,6 +53,7 @@ public enum RecordContentSourceKind
     CompiledScriptHeuristic,
     LooseScript,
     IniValue,
+    UiXmlText,
     LooseFile,
     ArchiveFile,
 }

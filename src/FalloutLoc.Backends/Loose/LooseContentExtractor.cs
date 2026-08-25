@@ -10,7 +10,7 @@ namespace FalloutLoc.Backends.Loose;
 /// </summary>
 public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
 {
-    public const string Version = "1";
+    public const string Version = "2";
     public const int MaximumFileBytes = 4 * 1024 * 1024;
 
     public LooseContentExtractionResult Extract(
@@ -20,10 +20,12 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(logicalPath);
         ArgumentNullException.ThrowIfNull(bytes);
-        if (sourceKind is not RecordContentSourceKind.LooseScript and not RecordContentSourceKind.IniValue)
+        if (sourceKind is not RecordContentSourceKind.LooseScript
+            and not RecordContentSourceKind.IniValue
+            and not RecordContentSourceKind.UiXmlText)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(sourceKind), sourceKind, "Loose extraction supports only scripts and INI values.");
+                nameof(sourceKind), sourceKind, "Loose extraction supports scripts, INI values, and UI XML text.");
         }
 
         if (bytes.Length > MaximumFileBytes)
@@ -41,9 +43,12 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
             return Skipped($"Text decoding failed: {exception.Message}");
         }
 
-        var entries = sourceKind == RecordContentSourceKind.IniValue
-            ? ExtractIni(lines)
-            : ExtractScript(lines);
+        var entries = sourceKind switch
+        {
+            RecordContentSourceKind.IniValue => ExtractIni(lines),
+            RecordContentSourceKind.UiXmlText => ExtractUiXml(lines),
+            _ => ExtractScript(lines),
+        };
         return new LooseContentExtractionResult
         {
             Entries = entries,
@@ -185,6 +190,388 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
         return entries;
     }
 
+    private IReadOnlyList<LooseContentEntry> ExtractUiXml(IReadOnlyList<string> lines)
+    {
+        var entries = new List<LooseContentEntry>();
+        var elements = new List<XmlElementFrame>();
+        var source = string.Join('\n', lines);
+        var offset = 0;
+        var lineNumber = 1;
+        while (offset < source.Length)
+        {
+            if (source.AsSpan(offset).StartsWith("<!--", StringComparison.Ordinal))
+            {
+                var commentEnd = source.IndexOf("-->", offset + 4, StringComparison.Ordinal);
+                var next = commentEnd < 0 ? source.Length : commentEnd + 3;
+                lineNumber += CountNewLines(source.AsSpan(offset, next - offset));
+                offset = next;
+                continue;
+            }
+
+            if (source.AsSpan(offset).StartsWith("<![CDATA[", StringComparison.Ordinal))
+            {
+                var contentStart = offset + 9;
+                var cdataEnd = source.IndexOf("]]>", contentStart, StringComparison.Ordinal);
+                var contentEnd = cdataEnd < 0 ? source.Length : cdataEnd;
+                AddXmlText(
+                    source.AsSpan(contentStart, contentEnd - contentStart),
+                    lineNumber,
+                    lines,
+                    elements,
+                    entries);
+                var next = cdataEnd < 0 ? source.Length : cdataEnd + 3;
+                lineNumber += CountNewLines(source.AsSpan(offset, next - offset));
+                offset = next;
+                continue;
+            }
+
+            if (source[offset] == '<')
+            {
+                var tagEnd = FindXmlTagEnd(source, offset + 1);
+                if (tagEnd < 0)
+                {
+                    break;
+                }
+
+                ProcessXmlTag(source.AsSpan(offset + 1, tagEnd - offset - 1), elements);
+                lineNumber += CountNewLines(source.AsSpan(offset, tagEnd - offset + 1));
+                offset = tagEnd + 1;
+                continue;
+            }
+
+            var nextTag = source.IndexOf('<', offset);
+            if (nextTag < 0)
+            {
+                nextTag = source.Length;
+            }
+
+            AddXmlText(
+                source.AsSpan(offset, nextTag - offset),
+                lineNumber,
+                lines,
+                elements,
+                entries);
+            lineNumber += CountNewLines(source.AsSpan(offset, nextTag - offset));
+            offset = nextTag;
+        }
+
+        return entries;
+    }
+
+    private void AddXmlText(
+        ReadOnlySpan<char> sourceText,
+        int segmentLineNumber,
+        IReadOnlyList<string> lines,
+        IReadOnlyList<XmlElementFrame> elements,
+        ICollection<LooseContentEntry> entries)
+    {
+        var first = 0;
+        while (first < sourceText.Length && char.IsWhiteSpace(sourceText[first]))
+        {
+            first++;
+        }
+
+        if (first == sourceText.Length)
+        {
+            return;
+        }
+
+        var last = sourceText.Length - 1;
+        while (last >= first && char.IsWhiteSpace(sourceText[last]))
+        {
+            last--;
+        }
+
+        var lineNumber = segmentLineNumber + CountNewLines(sourceText[..first]);
+        var decoded = decoder.Decode(sourceText[first..(last + 1)].ToString());
+        var text = NormalizeXmlWhitespace(DecodeStandardXmlEntities(decoded.Text ?? string.Empty));
+        if (text.Length == 0 || !text.Any(char.IsLetter) || IsEntitySequence(text))
+        {
+            return;
+        }
+
+        var element = elements.Count == 0 ? null : elements[^1];
+        var occurrence = element is null ? 1 : ++element.TextOccurrences;
+        var path = BuildXmlElementPath(elements);
+        var rawContext = lineNumber > 0 && lineNumber <= lines.Count
+            ? lines[lineNumber - 1].Trim()
+            : text;
+        var decodedContext = decoder.Decode(rawContext).Text ?? rawContext;
+        entries.Add(CreateEntry(
+            $"element[{path}].text[{occurrence}]",
+            text,
+            decodedContext,
+            lineNumber,
+            decoded));
+    }
+
+    private static void ProcessXmlTag(ReadOnlySpan<char> rawTag, IList<XmlElementFrame> elements)
+    {
+        var tag = rawTag.Trim();
+        if (tag.Length == 0 || tag[0] is '!' or '?')
+        {
+            return;
+        }
+
+        if (tag[0] == '/')
+        {
+            var closingName = ReadXmlName(tag[1..]);
+            for (var index = elements.Count - 1; index >= 0; index--)
+            {
+                if (!elements[index].Name.Equals(closingName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                while (elements.Count > index)
+                {
+                    elements.RemoveAt(elements.Count - 1);
+                }
+
+                break;
+            }
+
+            return;
+        }
+
+        var selfClosing = tag[^1] == '/';
+        var name = ReadXmlName(tag);
+        if (name.Length == 0 || selfClosing)
+        {
+            return;
+        }
+
+        elements.Add(new XmlElementFrame(name, ReadXmlAttribute(tag, "name")));
+    }
+
+    private static string ReadXmlName(ReadOnlySpan<char> value)
+    {
+        var length = 0;
+        while (length < value.Length && !char.IsWhiteSpace(value[length]) && value[length] is not '/' and not '>')
+        {
+            length++;
+        }
+
+        return value[..length].ToString();
+    }
+
+    private static string? ReadXmlAttribute(ReadOnlySpan<char> tag, string attributeName)
+    {
+        for (var offset = 0; offset < tag.Length; offset++)
+        {
+            if (offset > 0 && !char.IsWhiteSpace(tag[offset - 1]))
+            {
+                continue;
+            }
+
+            if (!tag[offset..].StartsWith(attributeName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var cursor = offset + attributeName.Length;
+            while (cursor < tag.Length && char.IsWhiteSpace(tag[cursor]))
+            {
+                cursor++;
+            }
+
+            if (cursor >= tag.Length || tag[cursor] != '=')
+            {
+                continue;
+            }
+
+            cursor++;
+            while (cursor < tag.Length && char.IsWhiteSpace(tag[cursor]))
+            {
+                cursor++;
+            }
+
+            if (cursor >= tag.Length || tag[cursor] is not ('"' or '\''))
+            {
+                continue;
+            }
+
+            var quote = tag[cursor++];
+            var end = tag[cursor..].IndexOf(quote);
+            return end < 0 ? null : tag.Slice(cursor, end).ToString();
+        }
+
+        return null;
+    }
+
+    private static int FindXmlTagEnd(string source, int offset)
+    {
+        var quote = '\0';
+        for (var index = offset; index < source.Length; index++)
+        {
+            var current = source[index];
+            if (quote != '\0')
+            {
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                quote = current;
+            }
+            else if (current == '>')
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string BuildXmlElementPath(IReadOnlyList<XmlElementFrame> elements)
+    {
+        if (elements.Count == 0)
+        {
+            return "document";
+        }
+
+        return string.Join('/', elements
+            .Skip(Math.Max(0, elements.Count - 3))
+            .Select(element => element.NameAttribute is null
+                ? element.Name
+                : $"{element.Name}[name={element.NameAttribute}]"));
+    }
+
+    private static string NormalizeXmlWhitespace(string value)
+    {
+        var normalized = new StringBuilder(value.Length);
+        var pendingSpace = false;
+        foreach (var current in value.Trim())
+        {
+            if (char.IsWhiteSpace(current))
+            {
+                pendingSpace = normalized.Length > 0;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                normalized.Append(' ');
+                pendingSpace = false;
+            }
+
+            normalized.Append(current);
+        }
+
+        return normalized.ToString();
+    }
+
+    private static string DecodeStandardXmlEntities(string value)
+    {
+        var decoded = new StringBuilder(value.Length);
+        for (var offset = 0; offset < value.Length; offset++)
+        {
+            if (value[offset] != '&')
+            {
+                decoded.Append(value[offset]);
+                continue;
+            }
+
+            var end = value.IndexOf(';', offset + 1);
+            if (end < 0)
+            {
+                decoded.Append(value[offset]);
+                continue;
+            }
+
+            var entity = value[(offset + 1)..end];
+            var replacement = entity switch
+            {
+                "amp" => "&",
+                "lt" => "<",
+                "gt" => ">",
+                "quot" => "\"",
+                "apos" => "'",
+                _ => DecodeNumericXmlEntity(entity),
+            };
+            if (replacement is null)
+            {
+                decoded.Append(value, offset, end - offset + 1);
+            }
+            else
+            {
+                decoded.Append(replacement);
+            }
+
+            offset = end;
+        }
+
+        return decoded.ToString();
+    }
+
+    private static string? DecodeNumericXmlEntity(string entity)
+    {
+        var hex = entity.StartsWith("#x", StringComparison.OrdinalIgnoreCase);
+        var number = hex ? entity[2..] : entity.StartsWith('#') ? entity[1..] : string.Empty;
+        if (number.Length == 0 || !int.TryParse(
+                number,
+                hex ? System.Globalization.NumberStyles.HexNumber : System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var codePoint)
+            || !Rune.IsValid(codePoint))
+        {
+            return null;
+        }
+
+        return char.ConvertFromUtf32(codePoint);
+    }
+
+    private static bool IsEntitySequence(string value)
+    {
+        var offset = 0;
+        while (offset < value.Length)
+        {
+            while (offset < value.Length && char.IsWhiteSpace(value[offset]))
+            {
+                offset++;
+            }
+
+            if (offset == value.Length)
+            {
+                return true;
+            }
+
+            if (value[offset] != '&')
+            {
+                return false;
+            }
+
+            var end = value.IndexOf(';', offset + 1);
+            if (end < 0 || end == offset + 1)
+            {
+                return false;
+            }
+
+            offset = end + 1;
+        }
+
+        return true;
+    }
+
+    private static int CountNewLines(ReadOnlySpan<char> value)
+    {
+        var count = 0;
+        foreach (var current in value)
+        {
+            if (current == '\n')
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     private static LooseContentEntry CreateEntry(
         string semanticPath,
         string text,
@@ -319,6 +706,11 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
         Entries = [],
         Warnings = [warning],
     };
+
+    private sealed record XmlElementFrame(string Name, string? NameAttribute)
+    {
+        public int TextOccurrences { get; set; }
+    }
 }
 
 public sealed record LooseContentEntry

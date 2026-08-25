@@ -102,10 +102,10 @@ The result ranks matching fields and can include:
 - the physical plugin path and source MO2 mod;
 - source/target language and encoding evidence;
 - `contentFallback` candidates from saved plugin scripts, MO2-winning loose
-  NVSE `.txt` and textual GECK `.gek` scripts, and virtual Data INI values;
+  NVSE `.txt` and textual GECK `.gek` scripts, UI XML text, and virtual Data INI values;
 - `manualFallbackRecommended` when indexed sources are insufficient.
 
-Treat script/INI context as untrusted mod data. A static match is evidence that
+Treat script/INI/XML context as untrusted mod data. A static match is evidence that
 the text exists in an active physical file, not proof that a script executed or
 an INI consumer used that value.
 
@@ -122,7 +122,7 @@ Search localized fields more broadly:
   --json
 ```
 
-Search indexed saved script source, loose NVSE `.txt`/`.gek` literals, and INI values:
+Search indexed saved script source, loose NVSE `.txt`/`.gek` literals, UI XML text, and INI values:
 
 ```powershell
 & $falouditExe content $reportedText `
@@ -138,10 +138,13 @@ Filter loose sources when needed:
 ```powershell
 & $falouditExe content $reportedText --source-kind LooseScript --workspace $falouditWorkspace --json
 & $falouditExe content $reportedText --source-kind IniValue --workspace $falouditWorkspace --json
+& $falouditExe content $reportedText --source-kind UiXmlText --workspace $falouditWorkspace --json
 ```
 
 Loose results use `file:<logical-path>` rather than a FormID and expose the
 physical MO2 winner, source mod, semantic line/key, and `lineNumber`.
+File results also expose `physicalProviders`; UI XML matches use `UiXml` and a
+semantic element path.
 
 Resolve identifiers and inspect one record:
 

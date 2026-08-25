@@ -83,7 +83,15 @@ Script results store quoted literals with their executable source line; INI
 results store section/key, value, and line number. Comments, MO2 `meta.ini`,
 `.mohidden` trees, and Windows `desktop.ini` are excluded.
 
-Saved or loose source proves static presence, not runtime execution. Compiled
+FaLoudit 0.4.3 also indexes literal text nodes containing letters from
+MO2-winning `Menus/**/*.xml` UI files as `UiXmlText`. It tolerates Bethesda
+entities and imperfect XML, decodes standard XML entities, and excludes
+comments, entity-only references, numeric-only layout values, and non-menu
+packaging XML. Results include the semantic element path, line, context, and
+complete MO2 physical provider chain.
+
+Saved, loose, or UI XML source proves static presence, not runtime execution or
+visibility. Compiled
 bytecode without source and BSA content are not decoded. A miss therefore emits
 `manualFallbackRecommended` instead of claiming absence. Script coverage gaps
 remain visible and are not plugin corruption.

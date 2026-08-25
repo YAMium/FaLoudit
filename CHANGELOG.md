@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.3 — 2026-08-25
+
+- Added MO2-aware indexing of literal UI text from winning
+  `Menus/**/*.xml` files without requiring strict, well-formed XML.
+- Added `UiXmlText` content evidence with a synthetic `file:<logical-path>`
+  identity, semantic element path, line number, encoding evidence, and bounded
+  untrusted source context.
+- Excluded XML comments, entity-only references, and numeric-only layout values
+  while decoding standard XML entities and configured legacy code pages.
+- Exposed the complete MO2 physical provider chain on loose-content search and
+  analysis results so an AI reviewer can distinguish the winning UI file from
+  lower-priority alternatives.
+- Advanced the loose extractor fingerprint so existing schema-7 workspaces
+  rebuild automatically while retaining reusable plugin caches.
+
 ## 0.4.2 — 2026-08-24
 
 - Added MO2-aware indexing of winning loose NVSE scripts from

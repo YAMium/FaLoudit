@@ -62,6 +62,44 @@ public sealed class LooseContentExtractorTests
     }
 
     [Fact]
+    public void ExtractsUiXmlTextWithoutRequiringStrictlyValidXml()
+    {
+        System.Text.Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = System.Text.Encoding.GetEncoding(1251).GetBytes("""
+            <!-- <_VUI+Hidden>COMMENT TEXT</_VUI+Hidden> -->
+            <rect name="Strings">
+                <_VUI+RBCtitle>RADIOLOGICAL BIOLOGICAL CHEMICAL REPORT</_VUI+RBCtitle>
+                <string>Research &amp; Development</string>
+                <string>Открыть</string>
+                <copy>&center;</copy>
+                <number>42</number>
+            </mismatched-but-tolerated>
+            """);
+
+        var result = _extractor.Extract(
+            @"Menus\globals.xml",
+            RecordContentSourceKind.UiXmlText,
+            bytes);
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(3, result.Entries.Count);
+        var title = Assert.Single(
+            result.Entries,
+            entry => entry.Text == "RADIOLOGICAL BIOLOGICAL CHEMICAL REPORT");
+        Assert.Equal(3, title.LineNumber);
+        Assert.Contains("rect[name=Strings]/_VUI+RBCtitle", title.SemanticPath);
+        Assert.Contains("_VUI+RBCtitle", title.Context);
+        Assert.Equal(
+            "Research & Development",
+            Assert.Single(result.Entries, entry => entry.LineNumber == 4).Text);
+        var translated = Assert.Single(result.Entries, entry => entry.Text == "Открыть");
+        Assert.Equal(5, translated.LineNumber);
+        Assert.Equal(StringEncodingEvidence.TargetCodePageRecovered, translated.EncodingEvidence);
+        Assert.DoesNotContain(result.Entries, entry => entry.Text.Contains("COMMENT", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Entries, entry => entry.Text.Contains("center", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void RejectsUnmarkedBinaryFiles()
     {
         var result = _extractor.Extract(

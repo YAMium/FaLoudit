@@ -13,7 +13,7 @@ public sealed class ProgramTests
         var result = Invoke("--version");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Equal("0.4.2", result.Output.Trim());
+        Assert.Equal("0.4.3", result.Output.Trim());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class ProgramTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("0.4.2", root.GetProperty("applicationVersion").GetString());
+        Assert.Equal("0.4.3", root.GetProperty("applicationVersion").GetString());
         Assert.Equal("find", root.GetProperty("command").GetString());
         Assert.True(root.GetProperty("success").GetBoolean());
         Assert.Equal(0, root.GetProperty("exitCode").GetInt32());

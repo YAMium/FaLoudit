@@ -352,7 +352,7 @@ public sealed class SqliteIndexTests
     }
 
     [Fact]
-    public void IndexesMo2WinningLooseScriptsAndIniValuesAsFileEvidence()
+    public void IndexesMo2WinningLooseScriptsIniValuesAndUiXmlAsFileEvidence()
     {
         using var area = new TestArea();
         var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>(StringComparer.OrdinalIgnoreCase)
@@ -361,6 +361,31 @@ public sealed class SqliteIndexTests
         };
         var request = Request(area, "base.esm") with
         {
+            PhysicalProviders =
+            [
+                new IndexPhysicalProviderInput
+                {
+                    LogicalPath = @"Menus\globals.xml",
+                    SourceKind = "Mod",
+                    SourceName = "Old UI Mod",
+                    EffectivePriority = 39,
+                    PhysicalPath = Path.Combine(area.Source, "old", "globals.xml"),
+                    IsWinner = false,
+                    FileLength = 75,
+                    LastWriteUtc = DateTime.UnixEpoch,
+                },
+                new IndexPhysicalProviderInput
+                {
+                    LogicalPath = @"Menus\globals.xml",
+                    SourceKind = "Mod",
+                    SourceName = "UI Mod",
+                    EffectivePriority = 40,
+                    PhysicalPath = Path.Combine(area.Source, "winner", "globals.xml"),
+                    IsWinner = true,
+                    FileLength = 75,
+                    LastWriteUtc = DateTime.UnixEpoch,
+                },
+            ],
             LooseContentFiles =
             [
                 new IndexLooseContentFileInput
@@ -409,14 +434,37 @@ public sealed class SqliteIndexTests
                         },
                     ],
                 },
+                new IndexLooseContentFileInput
+                {
+                    LogicalPath = @"Menus\globals.xml",
+                    PhysicalPath = Path.Combine(area.Source, "globals.xml"),
+                    SourceMod = "UI Mod",
+                    EffectivePriority = 40,
+                    SourceKind = RecordContentSourceKind.UiXmlText,
+                    FileLength = 75,
+                    LastWriteUtc = DateTime.UnixEpoch,
+                    Entries =
+                    [
+                        new IndexLooseContentEntryInput
+                        {
+                            SemanticPath = "element[rect[name=Strings]/_VUI+RBCtitle].text[1]",
+                            Text = "RADIOLOGICAL BIOLOGICAL CHEMICAL REPORT",
+                            Context = "<_VUI+RBCtitle>RADIOLOGICAL BIOLOGICAL CHEMICAL REPORT</_VUI+RBCtitle>",
+                            LineNumber = 44,
+                            EncodingEvidence = StringEncodingEvidence.Ascii,
+                            Ambiguous = false,
+                            IsHeuristic = true,
+                        },
+                    ],
+                },
             ],
         };
 
         var result = CreateBuilder(area, new FakeBackend(records)).Build(request);
         var repository = new SqliteIndexRepository(area.Database);
 
-        Assert.Equal(2, result.LooseContentFiles);
-        Assert.Equal(2, result.LooseContentEntries);
+        Assert.Equal(3, result.LooseContentFiles);
+        Assert.Equal(3, result.LooseContentEntries);
         var script = Assert.Single(repository.SearchContent(new IndexedContentSearchRequest
         {
             Query = "WELCOME TO NEW VEGAS",
@@ -442,8 +490,20 @@ public sealed class SqliteIndexTests
         }).Items);
         Assert.Equal(RecordContentSourceKind.IniValue, ini.SourceKind);
         Assert.Equal("[Interface].Open", ini.SemanticPath);
-        Assert.Equal(2, repository.GetStatus().LooseContentFiles);
-        Assert.Equal(2, repository.GetStatus().LooseContentEntries);
+        var xml = Assert.Single(repository.SearchContent(new IndexedContentSearchRequest
+        {
+            Query = "RADIOLOGICAL BIOLOGICAL CHEMICAL REPORT",
+            Mode = IndexedTextSearchMode.Exact,
+            RecordType = "UiXml",
+        }).Items);
+        Assert.Equal(RecordContentSourceKind.UiXmlText, xml.SourceKind);
+        Assert.Equal(@"file:Menus\globals.xml", xml.FormKey);
+        Assert.Equal("UI Mod", xml.SourceMod);
+        Assert.Equal(44, xml.LineNumber);
+        Assert.Equal(2, xml.PhysicalProviders.Count);
+        Assert.Equal("UI Mod", Assert.Single(xml.PhysicalProviders, provider => provider.IsWinner).SourceName);
+        Assert.Equal(3, repository.GetStatus().LooseContentFiles);
+        Assert.Equal(3, repository.GetStatus().LooseContentEntries);
 
         var changedScript = request.LooseContentFiles[0] with
         {
