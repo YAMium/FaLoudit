@@ -73,6 +73,11 @@ indexing continues and the snapshot exposes an actionable catalog warning.
 
 ## Current explicit limitation
 
+Version 0.4.4 recovers top-level SCPT SCTX source with XXXX extended lengths
+through Mutagen's framing API when its typed reader returns empty source.
+Compressed records are supported. This does not add bytecode decompilation
+or recovery of extended source inside nested result scripts.
+
 `find` covers only audited localization fields. FaLoudit 0.3 indexes saved source from top-level `Script` records and nested INFO begin/end, quest-stage, terminal-menu, package-event, perk-effect, and patrol scripts in the separate `content` layer. `analyze` queries that layer automatically only after localization fields have no match.
 
 FaLoudit 0.4.2 extends that content layer with MO2-winning loose NVSE scripts

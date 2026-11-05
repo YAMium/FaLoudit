@@ -14,7 +14,7 @@ public sealed class SqliteIndexBuilder(
     IPluginBackend backend,
     IPluginEncodingClassifier encodingClassifier)
 {
-    public const string IndexerCacheVersion = "9";
+    public const string IndexerCacheVersion = "10";
 
     public string CacheIdentity => $"{backend.Name}|schema={SqliteSchema.Version}|indexer={IndexerCacheVersion}";
 

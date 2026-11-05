@@ -61,6 +61,7 @@ public sealed class MutagenPluginBackend : IPluginBackend
         private readonly IPluginStringDecoder _decoder;
         private readonly IRecordStringExtractor<IMajorRecordGetter> _stringExtractor;
         private readonly IRecordContentExtractor<IMajorRecordGetter> _contentExtractor;
+        private readonly ScriptSourceRecovery _sourceRecovery;
         private bool _disposed;
 
         public Session(
@@ -74,6 +75,8 @@ public sealed class MutagenPluginBackend : IPluginBackend
             _decoder = decoder;
             _stringExtractor = stringExtractor;
             _contentExtractor = contentExtractor;
+            _sourceRecovery = new ScriptSourceRecovery(request.Path,
+                request.Mode == GameMode.Fallout3 ? global::Mutagen.Bethesda.GameRelease.Fallout3 : global::Mutagen.Bethesda.GameRelease.FalloutNV);
             Metadata = new PluginMetadata
             {
                 PluginName = mod.ModKey.ToString(),
@@ -105,6 +108,7 @@ public sealed class MutagenPluginBackend : IPluginBackend
             }
 
             _disposed = true;
+            _sourceRecovery.Dispose();
             _mod.Dispose();
         }
 
@@ -128,7 +132,22 @@ public sealed class MutagenPluginBackend : IPluginBackend
                     };
                 })
                 .ToArray();
-            var contents = _contentExtractor.Extract(record)
+            var rawContents = _contentExtractor.Extract(record);
+            string? recoveryWarning = null;
+            if (record is IScriptGetter && rawContents.Count == 0)
+            {
+                try
+                {
+                    var recovered = _sourceRecovery.Read(record.FormKey);
+                    if (!string.IsNullOrEmpty(recovered))
+                        rawContents = [new RawRecordContent("Fields.SourceCode", RecordContentSourceKind.EmbeddedScriptSource, recovered)];
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    recoveryWarning = $"Saved SCPT source recovery failed; source coverage is incomplete: {exception.Message}";
+                }
+            }
+            var contents = rawContents
                 .Select(raw =>
                 {
                     var decoded = _decoder.Decode(raw.BackendValue);
@@ -147,6 +166,11 @@ public sealed class MutagenPluginBackend : IPluginBackend
 
             var status = extraction.Status;
             var warnings = extraction.Warnings;
+            if (recoveryWarning is not null)
+            {
+                status = RecordParseStatus.PartiallyParsed;
+                warnings = [.. warnings, recoveryWarning];
+            }
             if (contents.Length > 0 && NormalizeRecordType(record.Registration.GetterType.Name) == "Script")
             {
                 status = RecordParseStatus.PartiallyParsed;

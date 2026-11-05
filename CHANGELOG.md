@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.4 — 2026-11-05
+
+- Recovered saved SCPT source omitted by Mutagen's typed reader when SCTX uses
+  an XXXX extended size, including compressed records, through Mutagen's own
+  record locator and subrecord framing APIs.
+- Reported recovery errors as incomplete source coverage instead of silently
+  skipping them. Compiled bytecode remains outside automatic analysis.
+- Invalidated plugin caches (indexer version 10) so existing indexes reparse
+  affected plugins; SQLite schema remains 7.
+
 ## 0.4.3 — 2026-08-25
 
 - Added MO2-aware indexing of literal UI text from winning
