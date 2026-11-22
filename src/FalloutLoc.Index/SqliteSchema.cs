@@ -4,7 +4,7 @@ namespace FalloutLoc.Index;
 
 internal static class SqliteSchema
 {
-    public const int Version = 7;
+    public const int Version = 8;
 
     public static void Create(SqliteConnection connection)
     {
@@ -18,7 +18,7 @@ internal static class SqliteSchema
             CREATE TABLE schema_info (
                 version INTEGER NOT NULL
             );
-            INSERT INTO schema_info(version) VALUES (7);
+            INSERT INTO schema_info(version) VALUES (8);
 
             CREATE TABLE snapshots (
                 id INTEGER PRIMARY KEY,
@@ -87,7 +87,7 @@ internal static class SqliteSchema
                 parse_warnings TEXT
             );
 
-            CREATE TABLE strings (
+            CREATE TABLE string_values (
                 id INTEGER PRIMARY KEY,
                 record_id INTEGER NOT NULL REFERENCES records(id),
                 semantic_path TEXT NOT NULL,
@@ -99,6 +99,25 @@ internal static class SqliteSchema
                 bytes_sha256 TEXT,
                 ambiguous INTEGER NOT NULL
             );
+
+            CREATE TABLE empty_field_shapes (
+                id INTEGER PRIMARY KEY,
+                semantic_path TEXT NOT NULL,
+                category TEXT NOT NULL,
+                UNIQUE(semantic_path, category)
+            );
+            CREATE TABLE empty_fields (
+                id INTEGER PRIMARY KEY,
+                record_id INTEGER NOT NULL REFERENCES records(id),
+                shape_id INTEGER NOT NULL REFERENCES empty_field_shapes(id)
+            );
+            CREATE VIEW strings AS
+                SELECT id, record_id, semantic_path, category, text, normalized_text,
+                       language, encoding_evidence, bytes_sha256, ambiguous FROM string_values
+                UNION ALL
+                SELECT e.id, e.record_id, k.semantic_path, k.category, NULL, NULL,
+                       'Empty', 'None', NULL, 0
+                FROM empty_fields e JOIN empty_field_shapes k ON k.id = e.shape_id;
 
             CREATE TABLE record_contents (
                 id INTEGER PRIMARY KEY,
@@ -172,34 +191,19 @@ internal static class SqliteSchema
         command.ExecuteNonQuery();
     }
 
-    private const string StringSearchIndex =
-        "CREATE INDEX ix_strings_normalized_text ON strings(normalized_text) WHERE normalized_text IS NOT NULL;";
-
-    // Old schema-7 snapshots remain readable. Upgrade just the secondary index on
-    // the staged copy during its next incremental build; no plugin reparse needed.
-    public static void UpgradeClonedSearchIndex(SqliteConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT [partial] FROM pragma_index_list('strings') WHERE name='ix_strings_normalized_text';";
-        if (command.ExecuteScalar() is 0L)
-        {
-            command.CommandText = "DROP INDEX ix_strings_normalized_text;" + StringSearchIndex + "ANALYZE ix_strings_normalized_text;";
-            command.ExecuteNonQuery();
-        }
-    }
-
     public static void Finalize(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = $"""
+        command.CommandText = """
             CREATE UNIQUE INDEX ux_plugins_snapshot_order ON plugins(snapshot_id, load_order_index);
             CREATE INDEX ix_plugins_name ON plugins(name COLLATE NOCASE);
             CREATE INDEX ix_records_form_key ON records(snapshot_id, form_key COLLATE NOCASE);
             CREATE INDEX ix_records_editor_id ON records(snapshot_id, editor_id COLLATE NOCASE);
             CREATE INDEX ix_records_coverage ON records(snapshot_id, parse_status, record_type);
-            CREATE INDEX ix_strings_record_id ON strings(record_id);
-            {StringSearchIndex}
-            CREATE INDEX ix_strings_diagnostics ON strings(language, category COLLATE NOCASE, record_id, semantic_path);
+            CREATE INDEX ix_strings_record_id ON string_values(record_id);
+            CREATE INDEX ix_strings_normalized_text ON string_values(normalized_text) WHERE normalized_text IS NOT NULL;
+            CREATE INDEX ix_strings_diagnostics ON string_values(language, category COLLATE NOCASE, record_id, semantic_path);
+            CREATE INDEX ix_empty_fields_record ON empty_fields(record_id);
             CREATE INDEX ix_record_contents_record_id ON record_contents(record_id);
             CREATE INDEX ix_record_contents_normalized_text ON record_contents(normalized_text);
             CREATE UNIQUE INDEX ux_engine_game_settings_editor

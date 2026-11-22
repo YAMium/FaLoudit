@@ -278,26 +278,83 @@ public sealed class SqliteIndexTests
     }
 
     [Fact]
-    public void IncrementalBuildUpgradesLegacyTextIndexWithoutReparsing()
+    public void CompactFieldsSurviveMixedInsertionAndIncrementalReplacement()
     {
         using var area = new TestArea();
-        var builder = CreateBuilder(area, new FakeBackend(TwoPluginRecords()));
-        var request = Request(area, "base.esm", "patch.esp");
-        builder.Build(request);
-        var cs = new SqliteConnectionStringBuilder { DataSource = area.Database, Pooling = false }.ToString();
-        using (var legacy = new SqliteConnection(cs))
+        var original = Record("000121:Base.esm", "Base", "");
+        var field = Assert.Single(original.Strings);
+        var mixed = original with
         {
-            legacy.Open();
-            using var sql = legacy.CreateCommand();
-            sql.CommandText = "DROP INDEX ix_strings_normalized_text; CREATE INDEX ix_strings_normalized_text ON strings(normalized_text);";
-            sql.ExecuteNonQuery();
-        }
-        Assert.Equal(2, builder.Build(request).ReusedPlugins);
+            Strings = [field with { Text = null }, field, field with { Text = null, Ambiguous = true },
+                field with { Text = null, RecoveredBytesSha256 = "keep" }, field with { Text = null }],
+        };
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] = [mixed],
+            ["patch.esp"] = [mixed],
+        };
+        var builder = CreateBuilder(area, new FakeBackend(records));
+        builder.Build(Request(area, "base.esm", "patch.esp"));
+        Assert.Equal(1, builder.Build(Request(area, "base.esm")).ReusedPlugins);
+        var cs = new SqliteConnectionStringBuilder { DataSource = area.Database, Pooling = false }.ToString();
         using var db = new SqliteConnection(cs);
         db.Open();
         using var check = db.CreateCommand();
-        check.CommandText = "SELECT [partial] FROM pragma_index_list('strings') WHERE name='ix_strings_normalized_text';";
-        Assert.Equal(1L, check.ExecuteScalar());
+        check.CommandText = """
+            SELECT (SELECT count(*) FROM empty_fields), (SELECT count(*) FROM string_values),
+                   (SELECT count(*) FROM empty_field_shapes), (SELECT count(DISTINCT id) FROM strings),
+                   (SELECT count(*) FROM strings WHERE bytes_sha256='keep');
+            """;
+        using var reader = check.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal((2L, 3L, 1L, 5L, 1L), (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2),
+            reader.GetInt64(3), reader.GetInt64(4)));
+        var trace = new SqliteIndexRepository(area.Database).Trace(original.FormKey);
+        var fields = Assert.Single(trace.Chain).Strings;
+        Assert.Equal(new string?[] { null, "", null, null, null }, fields.Select(x => x.Text));
+        Assert.True(fields[2].Ambiguous);
+    }
+
+    [Fact]
+    public void CompactNullWinnerRemainsARegressionCandidate()
+    {
+        using var area = new TestArea();
+        var original = Record("000121:Base.esm", "Original", "Перевод");
+        var field = Assert.Single(original.Strings);
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] = [original],
+            ["patch.esp"] = [original with { Strings = [field with { Text = null,
+                Language = TextLanguageKind.Empty, EncodingEvidence = StringEncodingEvidence.None }] }],
+        };
+        CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm", "patch.esp"));
+        var repository = new SqliteIndexRepository(area.Database);
+        Assert.Equal(original.FormKey, Assert.Single(repository.FindRegressionCandidateFormKeys(null, 10)));
+    }
+
+    [Fact]
+    public void EmptyGameSettingOverrideStillWinsOverEarlierSearchableValue()
+    {
+        using var area = new TestArea();
+        var original = Record("000111:Base.esm", "sTest", "Earlier text", recordType: "GameSettingString");
+        var field = Assert.Single(original.Strings) with { SemanticPath = "Data", Category = "game-setting" };
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] = [original with { Strings = [field] }],
+            ["patch.esp"] = [original with { Strings = [field with { Text = null, Language = TextLanguageKind.Empty,
+                EncodingEvidence = StringEncodingEvidence.None }] }],
+        };
+        CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm", "patch.esp"));
+        var repository = new SqliteIndexRepository(area.Database);
+        var hit = Assert.Single(repository.SearchText(new IndexedTextSearchRequest
+        {
+            Query = "Earlier text",
+            Mode = IndexedTextSearchMode.Exact,
+        }).Items);
+        Assert.False(hit.IsWinningOverride);
+        var winner = Assert.Single(repository.Trace("gmst:sTest").Chain, entry => entry.IsWinner);
+        Assert.Equal("patch.esp", winner.PluginName);
+        Assert.Null(Assert.Single(winner.Strings).Text);
     }
 
     [Fact]
@@ -421,7 +478,7 @@ public sealed class SqliteIndexTests
         };
 
         var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
-        Assert.Equal(7, result.SchemaVersion);
+        Assert.Equal(8, result.SchemaVersion);
         Assert.Equal(1, result.Contents);
         Assert.Empty(new SqliteIndexRepository(area.Database).Find("Welcome"));
 
@@ -790,7 +847,7 @@ public sealed class SqliteIndexTests
         var status = repository.GetStatus();
         var coverage = repository.GetCoverage();
 
-        Assert.Equal(7, result.SchemaVersion);
+        Assert.Equal(8, result.SchemaVersion);
         Assert.Equal(1, result.PartiallyParsedPlugins);
         Assert.Equal(2, result.CoverageGapRecords);
         Assert.Equal(1, status.PartiallyParsedPlugins);
@@ -934,7 +991,7 @@ public sealed class SqliteIndexTests
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE schema_info SET version = 1;";
+            command.CommandText = "UPDATE schema_info SET version = 7;";
             command.ExecuteNonQuery();
         }
 
@@ -944,7 +1001,7 @@ public sealed class SqliteIndexTests
         Assert.Equal(0, result.ReusedPlugins);
         Assert.Equal(1, result.ParsedPlugins);
         Assert.Equal(1, migrationBackend.OpenCount);
-        Assert.Equal(7, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
+        Assert.Equal(8, new SqliteIndexRepository(area.Database).GetStatus().SchemaVersion);
     }
 
     [Fact]

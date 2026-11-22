@@ -187,7 +187,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                        'plugin' AS source_kind,
                        p.load_order_index AS source_order,
                        s.id AS stable_id
-                FROM strings s
+                FROM string_values s
                 JOIN records r ON r.id = s.record_id
                 JOIN plugins p ON p.id = r.plugin_id
                 WHERE r.record_type <> 'GameSettingString' COLLATE NOCASE
@@ -851,48 +851,55 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
 
         using var connection = OpenValidated();
         using var command = connection.CreateCommand();
+        // With a provider filter, visit matching records before looking up earlier
+        // fields. Without it, let SQLite start from the much smaller value table.
+        var earlierFieldJoin = request.WinningPlugin is null && request.SourceMod is null ? "JOIN" : "CROSS JOIN";
         command.CommandText = request.Kind == IndexedDiagnosticKind.Regressions
-            ? """
+            ? $"""
               SELECT DISTINCT winner.form_key
-              FROM strings earlier_string
-              JOIN records earlier_record ON earlier_record.id = earlier_string.record_id
-              JOIN plugins earlier_plugin ON earlier_plugin.id = earlier_record.plugin_id
-              JOIN records winner
-                ON winner.snapshot_id = earlier_record.snapshot_id
-               AND winner.form_key = earlier_record.form_key COLLATE NOCASE
+              FROM records winner
               JOIN plugins winning_plugin ON winning_plugin.id = winner.plugin_id
-              JOIN strings winning_string
-                ON winning_string.record_id = winner.id
-               AND winning_string.semantic_path = earlier_string.semantic_path
-              WHERE (
-                    earlier_string.language = 'Target'
-                    OR (
-                        winning_string.language = 'Source'
-                        AND earlier_string.text IS NOT NULL
-                        AND TRIM(earlier_string.text) <> ''
-                        AND earlier_string.text <> winning_string.text
-                        AND EXISTS (
-                            SELECT 1
-                            FROM records source_record
-                            JOIN plugins source_plugin ON source_plugin.id = source_record.plugin_id
-                            JOIN strings source_string
-                              ON source_string.record_id = source_record.id
-                             AND source_string.semantic_path = winning_string.semantic_path
-                            WHERE source_record.snapshot_id = winner.snapshot_id
-                              AND source_record.form_key = winner.form_key COLLATE NOCASE
-                              AND source_plugin.load_order_index < earlier_plugin.load_order_index
-                              AND source_string.language = 'Source'
-                              AND source_string.text = winning_string.text
+              JOIN records earlier_record
+                ON earlier_record.snapshot_id = winner.snapshot_id
+               AND earlier_record.form_key = winner.form_key COLLATE NOCASE
+              JOIN plugins earlier_plugin ON earlier_plugin.id = earlier_record.plugin_id
+              {earlierFieldJoin} string_values earlier_string ON earlier_string.record_id = earlier_record.id
+              WHERE earlier_plugin.load_order_index < winning_plugin.load_order_index
+                AND (EXISTS (
+                  SELECT 1 FROM string_values winning_string
+                  WHERE winning_string.record_id = winner.id
+                    AND winning_string.semantic_path = earlier_string.semantic_path
+                    AND winning_string.language IN ('Source', 'Empty', 'Other')
+                    AND ($category IS NULL OR winning_string.category = $category COLLATE NOCASE)
+                    AND (earlier_string.language = 'Target' OR (
+                            winning_string.language = 'Source'
+                            AND earlier_string.text IS NOT NULL
+                            AND TRIM(earlier_string.text) <> ''
+                            AND earlier_string.text <> winning_string.text
+                            AND EXISTS (
+                                SELECT 1
+                                FROM records source_record
+                                JOIN plugins source_plugin ON source_plugin.id = source_record.plugin_id
+                                JOIN string_values source_string
+                                  ON source_string.record_id = source_record.id
+                                 AND source_string.semantic_path = winning_string.semantic_path
+                                WHERE source_record.snapshot_id = winner.snapshot_id
+                                  AND source_record.form_key = winner.form_key COLLATE NOCASE
+                                  AND source_plugin.load_order_index < earlier_plugin.load_order_index
+                                  AND source_string.language = 'Source'
+                                  AND source_string.text = winning_string.text
+                            )
                         )
                     )
-                )
-                AND winning_string.language IN ('Source', 'Empty', 'Other')
-                AND earlier_plugin.load_order_index < winning_plugin.load_order_index
+                ) OR (earlier_string.language = 'Target' AND EXISTS (
+                    SELECT 1 FROM empty_fields e JOIN empty_field_shapes k ON k.id = e.shape_id
+                    WHERE e.record_id = winner.id AND k.semantic_path = earlier_string.semantic_path
+                      AND ($category IS NULL OR k.category = $category COLLATE NOCASE)
+                )))
                 AND winning_plugin.parse_status IN ('parsed', 'partiallyParsed')
                 AND ($plugin IS NULL OR winning_plugin.name = $plugin COLLATE NOCASE)
                 AND ($mod IS NULL OR winning_plugin.source_mod = $mod COLLATE NOCASE)
                 AND ($type IS NULL OR winner.record_type = $type COLLATE NOCASE)
-                AND ($category IS NULL OR winning_string.category = $category COLLATE NOCASE)
                 AND NOT EXISTS (
                     SELECT 1
                     FROM records later_record
@@ -908,7 +915,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
               SELECT DISTINCT winner.form_key
               FROM records winner
               JOIN plugins winning_plugin ON winning_plugin.id = winner.plugin_id
-              JOIN strings winning_string ON winning_string.record_id = winner.id
+              JOIN string_values winning_string ON winning_string.record_id = winner.id
               WHERE winning_plugin.parse_status IN ('parsed', 'partiallyParsed')
                 AND winning_string.language = 'Source'
                 AND ($plugin IS NULL OR winning_plugin.name = $plugin COLLATE NOCASE)
@@ -927,7 +934,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
                   SELECT 1
                   FROM records earlier_record
                   JOIN plugins earlier_plugin ON earlier_plugin.id = earlier_record.plugin_id
-                  JOIN strings earlier_string ON earlier_string.record_id = earlier_record.id
+                  JOIN string_values earlier_string ON earlier_string.record_id = earlier_record.id
                   WHERE earlier_record.snapshot_id = winner.snapshot_id
                     AND earlier_record.form_key = winner.form_key COLLATE NOCASE
                     AND earlier_plugin.load_order_index < winning_plugin.load_order_index

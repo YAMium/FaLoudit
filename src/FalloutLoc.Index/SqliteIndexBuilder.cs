@@ -67,7 +67,6 @@ public sealed class SqliteIndexBuilder(
                 if (clonedPrevious)
                 {
                     ConfigureConnection(connection);
-                    SqliteSchema.UpgradeClonedSearchIndex(connection);
                     snapshotId = ResetClonedSnapshot(connection, request);
                     ReplaceProviders(connection, snapshotId, request.PhysicalProviders);
                     ReplaceGameSettings(connection, snapshotId, request);
@@ -718,7 +717,10 @@ public sealed class SqliteIndexBuilder(
 
         using var strings = connection.CreateCommand();
         strings.Transaction = transaction;
-        strings.CommandText = "DELETE FROM strings WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);";
+        strings.CommandText = """
+            DELETE FROM string_values WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);
+            DELETE FROM empty_fields WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);
+            """;
         strings.Parameters.AddWithValue("$id", pluginId);
         strings.ExecuteNonQuery();
 
@@ -821,11 +823,7 @@ public sealed class SqliteIndexBuilder(
             """);
         insertRecord.Bind(1, snapshotId);
         insertRecord.Bind(2, pluginId);
-        using var insertString = new RowInsert(transaction, """
-            INSERT INTO strings(record_id, semantic_path, category, text, normalized_text, language,
-                encoding_evidence, bytes_sha256, ambiguous)
-            VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9);
-            """);
+        using var stringFields = new StringFieldWriter(transaction);
         using var insertContent = CreateContentCommand(connection, transaction);
         var encodingFields = new List<RecordStringOccurrence>();
         long recordCount = 0;
@@ -856,16 +854,7 @@ public sealed class SqliteIndexBuilder(
 
             foreach (var field in record.Strings)
             {
-                insertString.Bind(1, recordId);
-                insertString.Bind(2, field.SemanticPath);
-                insertString.Bind(3, field.Category);
-                insertString.Bind(4, field.Text);
-                insertString.Bind(5, TextNormalizer.Normalize(field.Text));
-                insertString.Bind(6, field.Language.ToString());
-                insertString.Bind(7, field.EncodingEvidence.ToString());
-                insertString.Bind(8, field.RecoveredBytesSha256);
-                insertString.Bind(9, field.Ambiguous ? 1 : 0);
-                insertString.Execute();
+                stringFields.Insert(recordId, field);
                 encodingFields.Add(field);
                 stringCount++;
             }
