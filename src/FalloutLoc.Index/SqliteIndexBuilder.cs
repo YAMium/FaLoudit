@@ -67,6 +67,7 @@ public sealed class SqliteIndexBuilder(
                 if (clonedPrevious)
                 {
                     ConfigureConnection(connection);
+                    SqliteSchema.UpgradeClonedSearchIndex(connection);
                     snapshotId = ResetClonedSnapshot(connection, request);
                     ReplaceProviders(connection, snapshotId, request.PhysicalProviders);
                     ReplaceGameSettings(connection, snapshotId, request);

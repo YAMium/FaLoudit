@@ -73,7 +73,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var matchPredicate = request.Mode switch
         {
             IndexedTextSearchMode.Exact when request.IgnoreCase => "u.normalized_text = $normalized",
-            IndexedTextSearchMode.Exact => "u.text = $query COLLATE BINARY",
+            IndexedTextSearchMode.Exact => IndexedBinaryEquality,
             IndexedTextSearchMode.Contains when request.IgnoreCase => "u.normalized_text LIKE $pattern ESCAPE '\\'",
             IndexedTextSearchMode.Contains => "instr(u.text, $query) > 0",
             IndexedTextSearchMode.Regex => "faloudit_regex(u.text) = 1",
@@ -303,7 +303,7 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
         var matchPredicate = request.Mode switch
         {
             IndexedTextSearchMode.Exact when request.IgnoreCase => "u.normalized_text = $normalized",
-            IndexedTextSearchMode.Exact => "u.text = $query COLLATE BINARY",
+            IndexedTextSearchMode.Exact => IndexedBinaryEquality,
             IndexedTextSearchMode.Contains when request.IgnoreCase => "instr(u.normalized_text, $normalized) > 0",
             IndexedTextSearchMode.Contains => "instr(u.text, $query) > 0",
             IndexedTextSearchMode.Regex => "faloudit_content_regex(u.text) = 1",
@@ -1505,6 +1505,10 @@ public sealed class SqliteIndexRepository(string databasePath) : IIndexQuery
             throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be between 1 and 1000.");
         }
     }
+
+    // Normalization supplies indexed candidates, not equality: case and compatibility
+    // variants can share the same key and must still pass the original binary comparison.
+    private const string IndexedBinaryEquality = "u.normalized_text = $normalized AND u.text = $query COLLATE BINARY";
 
     private static string EscapeLike(string value) => value.Replace(@"\", @"\\", StringComparison.Ordinal)
         .Replace("%", @"\%", StringComparison.Ordinal)

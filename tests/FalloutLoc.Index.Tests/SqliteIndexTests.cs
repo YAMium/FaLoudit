@@ -258,6 +258,49 @@ public sealed class SqliteIndexTests
     }
 
     [Fact]
+    public void ExactSearchDistinguishesBinaryValuesWithTheSameNormalizedKey()
+    {
+        using var area = new TestArea();
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] =
+            [
+                Record("000121:Base.esm", "First", "é"),
+                Record("000122:Base.esm", "Second", "e\u0301"),
+                Record("000123:Base.esm", "Third", "É"),
+            ],
+        };
+        CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
+        var repository = new SqliteIndexRepository(area.Database);
+        var request = new IndexedTextSearchRequest { Query = "é", Mode = IndexedTextSearchMode.Exact };
+        Assert.Equal("000121:Base.esm", Assert.Single(repository.SearchText(request).Items).FormKey);
+        Assert.Equal(3, repository.SearchText(request with { IgnoreCase = true }).Items.Count);
+    }
+
+    [Fact]
+    public void IncrementalBuildUpgradesLegacyTextIndexWithoutReparsing()
+    {
+        using var area = new TestArea();
+        var builder = CreateBuilder(area, new FakeBackend(TwoPluginRecords()));
+        var request = Request(area, "base.esm", "patch.esp");
+        builder.Build(request);
+        var cs = new SqliteConnectionStringBuilder { DataSource = area.Database, Pooling = false }.ToString();
+        using (var legacy = new SqliteConnection(cs))
+        {
+            legacy.Open();
+            using var sql = legacy.CreateCommand();
+            sql.CommandText = "DROP INDEX ix_strings_normalized_text; CREATE INDEX ix_strings_normalized_text ON strings(normalized_text);";
+            sql.ExecuteNonQuery();
+        }
+        Assert.Equal(2, builder.Build(request).ReusedPlugins);
+        using var db = new SqliteConnection(cs);
+        db.Open();
+        using var check = db.CreateCommand();
+        check.CommandText = "SELECT [partial] FROM pragma_index_list('strings') WHERE name='ix_strings_normalized_text';";
+        Assert.Equal(1L, check.ExecuteScalar());
+    }
+
+    [Fact]
     public void SearchApiAppliesModesFiltersAndQueryBoundPagination()
     {
         using var area = new TestArea();
