@@ -1635,22 +1635,18 @@ public static class Program
         SourceFileSystem sourceFileSystem)
     {
         var pair = configuration.RequireLanguagePair();
-        var extractor = new LooseContentExtractor(new StrictPluginStringDecoder(pair.Source, pair.Target));
-        var extracted = new List<IndexLooseContentFileInput>(files.Count);
-        var warnings = new List<string>();
-        foreach (var file in files)
+        using var extractors = new ThreadLocal<LooseContentExtractor>(() =>
+            new LooseContentExtractor(new StrictPluginStringDecoder(pair.Source, pair.Target)));
+        var extracted = SourceReadBatch.Map(files, sourceFileSystem, file =>
         {
             try
             {
-                var result = extractor.Extract(
-                    file.LogicalPath,
-                    file.SourceKind,
-                    sourceFileSystem.ReadAllBytes(file.PhysicalPath));
+                using var stream = sourceFileSystem.OpenRead(file.PhysicalPath);
+                var result = extractors.Value!.ExtractFile(file.LogicalPath, file.SourceKind, stream);
                 var fileWarnings = result.Warnings
                     .Select(warning => $"{file.LogicalPath}: {warning}")
                     .ToArray();
-                warnings.AddRange(fileWarnings);
-                extracted.Add(file with
+                return file with
                 {
                     Entries = result.Entries.Select(entry => new IndexLooseContentEntryInput
                     {
@@ -1663,17 +1659,16 @@ public static class Program
                         IsHeuristic = entry.IsHeuristic,
                     }).ToArray(),
                     Warnings = fileWarnings,
-                });
+                };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 var warning = $"{file.LogicalPath}: read failed: {exception.Message}";
-                warnings.Add(warning);
-                extracted.Add(file with { Warnings = [warning] });
+                return file with { Warnings = [warning] };
             }
-        }
+        }, maxWorkers: 4);
 
-        return new LooseContentExtraction(extracted, warnings);
+        return new LooseContentExtraction(extracted, extracted.SelectMany(file => file.Warnings).ToArray());
     }
 
     private static GameSettingInputs LoadGameSettingInputs(

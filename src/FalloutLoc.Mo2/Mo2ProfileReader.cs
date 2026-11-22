@@ -54,9 +54,8 @@ public sealed class Mo2ProfileReader(ISourceFileSystem sourceFileSystem)
 
     private IReadOnlyList<Mo2ModEntry> ParseModlist(IReadOnlyList<string> lines, string modsRoot)
     {
-        var results = new List<Mo2ModEntry>();
+        var candidates = new List<(string Name, char Marker, int Line, string Directory)>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var knownOrdinal = 0;
 
         for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
@@ -77,14 +76,22 @@ public sealed class Mo2ProfileReader(ISourceFileSystem sourceFileSystem)
                 continue;
             }
 
-            var directory = Path.Combine(modsRoot, name);
-            var directoryExists = sourceFileSystem.DirectoryExists(directory);
+            candidates.Add((name, marker, lineIndex + 1, Path.Combine(modsRoot, name)));
+        }
+
+        var present = SourceReadBatch.Map(candidates, sourceFileSystem, entry => sourceFileSystem.DirectoryExists(entry.Directory));
+        var results = new List<Mo2ModEntry>(candidates.Count);
+        var knownOrdinal = 0;
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var (name, marker, line, directory) = candidates[i];
+            var directoryExists = present[i];
             results.Add(new Mo2ModEntry
             {
                 Name = name,
                 Marker = marker,
                 Enabled = marker != '-',
-                ProfileLine = lineIndex + 1,
+                ProfileLine = line,
                 Ordinal = directoryExists ? knownOrdinal++ : -1,
                 EffectivePriority = -1,
                 Directory = PathRules.NormalizeAbsolute(directory),

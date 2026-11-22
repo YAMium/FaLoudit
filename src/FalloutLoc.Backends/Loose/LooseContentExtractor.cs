@@ -13,6 +13,22 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
     public const string Version = "2";
     public const int MaximumFileBytes = 4 * 1024 * 1024;
 
+    /// <summary>Read a newly opened, seekable source. Enforce the byte cap before allocating.</summary>
+    public LooseContentExtractionResult ExtractFile(string logicalPath, RecordContentSourceKind sourceKind, Stream source)
+    {
+        if (!source.CanSeek || source.Position != 0)
+            throw new ArgumentException("Expected a seekable file positioned at its start.", nameof(source));
+        var length = source.Length;
+        if (length > MaximumFileBytes) return Oversized();
+        var bytes = new byte[(int)length];
+        source.ReadExactly(bytes);
+        if (source.ReadByte() != -1) throw new IOException("Loose file grew while being read.");
+        return Extract(logicalPath, sourceKind, bytes);
+    }
+
+    private static LooseContentExtractionResult Oversized() =>
+        Skipped($"File exceeds the {MaximumFileBytes:N0}-byte loose-content safety limit.");
+
     public LooseContentExtractionResult Extract(
         string logicalPath,
         RecordContentSourceKind sourceKind,
@@ -30,7 +46,7 @@ public sealed class LooseContentExtractor(StrictPluginStringDecoder decoder)
 
         if (bytes.Length > MaximumFileBytes)
         {
-            return Skipped($"File exceeds the {MaximumFileBytes:N0}-byte loose-content safety limit.");
+            return Oversized();
         }
 
         IReadOnlyList<string> lines;

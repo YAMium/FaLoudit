@@ -100,6 +100,31 @@ public sealed class LooseContentExtractorTests
     }
 
     [Fact]
+    public void FileExtractionChecksSizeBeforeReadingAndDoesNotAcceptTruncatedContent()
+    {
+        const string path = "settings.ini";
+        const RecordContentSourceKind kind = RecordContentSourceKind.IniValue;
+        byte[] bytes = "[UI]\nLabel=Evidence"u8.ToArray();
+        using var valid = new MemoryStream(bytes);
+        var expected = _extractor.Extract(path, kind, bytes);
+        var actual = _extractor.ExtractFile(path, kind, valid);
+        Assert.Equal(expected.Entries.ToArray(), actual.Entries.ToArray());
+        Assert.Empty(actual.Warnings);
+
+        using var oversized = new ReportedLengthStream([], LooseContentExtractor.MaximumFileBytes + 1L);
+        var skipped = _extractor.ExtractFile(path, kind, oversized);
+        Assert.Contains("safety limit", Assert.Single(skipped.Warnings));
+        Assert.Empty(skipped.Entries);
+        using var changed = new ReportedLengthStream(bytes, bytes.Length - 1);
+        Assert.Throws<IOException>(() => _extractor.ExtractFile(path, kind, changed));
+    }
+
+    private sealed class ReportedLengthStream(byte[] bytes, long length) : MemoryStream(bytes)
+    {
+        public override long Length => length;
+    }
+
+    [Fact]
     public void RejectsUnmarkedBinaryFiles()
     {
         var result = _extractor.Extract(

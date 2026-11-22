@@ -108,6 +108,10 @@ MO2 priority; exactly one provider is marked `isWinner` when resolution
 succeeds. These additions do not change top-level JSON schema 2 or SQLite
 schema 7.
 
+FaLoudit 0.4.6 changes the internal SQLite snapshot schema to 8. The
+top-level JSON contract is still 2; compact NULL fields retain their logical
+identity, position and diagnostic meaning in search and trace results.
+
 ## Compatibility rule
 
 Consumers must require top-level `schemaVersion: 2`. Schema-1 consumers must

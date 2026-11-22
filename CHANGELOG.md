@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.6 — 2026-11-22
+
+- Check independent MO2 directories and file providers concurrently, then
+  merge in profile order. Up to eight readers check metadata; up to four
+  extract loose content, enforcing the file size limit before allocation.
+  Freshness is still verified on every `analyze`.
+- Speed up exact searches using normalized candidates followed by a binary
+  comparison of the original text. NULLs remain visible in diagnostics but
+  are not included in the text search index.
+- Compact empty plugin string fields without losing override IDs, paths,
+  encoding evidence or the distinction between NULL and an empty string.
+  On one large TTW profile this reduced the database size by 22%.
+- Reuse a temporary set of record IDs when removing or updating a plugin,
+  without adding a permanent database index.
+- **Upgrade:** run `faloudit index` once in the existing workspace. SQLite
+  schema 7 is rebuilt atomically as schema 8; configuration and CLI JSON
+  schema 2 are unchanged.
+
 ## 0.4.5 — 2026-11-22
 
 - Reuse one in-memory directory inventory per freshness check across plugin,

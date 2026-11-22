@@ -1,10 +1,10 @@
-# Compact SQLite string fields (experimental schema 8)
+# Compact SQLite string fields: schema 8 benchmark
 
 The control is the schema-7 exact-search/partial-index change at `dc3b784`.
 Both variants keep SQLite, the plugin parser, the CLI contract, and the freshness
-checks. This is an experiment, not an in-place migration or a released format.
-Use a **separate FaLoudit workspace**: switching between these versions requires
-an atomic index rebuild. Do not point an experimental executable at a production index.
+checks. The compact format tested here shipped in 0.4.6. For the normal
+one-time rebuild, see [index operations](../OPERATIONS.md). To reproduce
+the experiment itself, use separate workspaces for the two executable versions.
 
 Only fields with SQL NULL text, language `Empty`, encoding evidence `None`,
 no byte hash, and no ambiguity are packed. A row keeps its original occurrence

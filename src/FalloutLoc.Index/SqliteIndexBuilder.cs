@@ -709,26 +709,21 @@ public sealed class SqliteIndexBuilder(
 
     private static void DeletePluginData(SqliteConnection connection, SqliteTransaction transaction, long pluginId)
     {
-        using var contents = connection.CreateCommand();
-        contents.Transaction = transaction;
-        contents.CommandText = "DELETE FROM record_contents WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);";
-        contents.Parameters.AddWithValue("$id", pluginId);
-        contents.ExecuteNonQuery();
-
-        using var strings = connection.CreateCommand();
-        strings.Transaction = transaction;
-        strings.CommandText = """
-            DELETE FROM string_values WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);
-            DELETE FROM empty_fields WHERE record_id IN (SELECT id FROM records WHERE plugin_id = $id);
+        using var retire = connection.CreateCommand();
+        retire.Transaction = transaction;
+        // Resolve membership once. IDs are transaction-local and parent records
+        // are removed last, with foreign-key enforcement still active.
+        retire.CommandText = """
+            CREATE TEMP TABLE retiring_record_ids(id INTEGER PRIMARY KEY);
+            INSERT INTO retiring_record_ids SELECT id FROM records WHERE plugin_id=$id;
+            DELETE FROM record_contents WHERE record_id IN (SELECT id FROM temp.retiring_record_ids);
+            DELETE FROM string_values WHERE record_id IN (SELECT id FROM temp.retiring_record_ids);
+            DELETE FROM empty_fields WHERE record_id IN (SELECT id FROM temp.retiring_record_ids);
+            DELETE FROM records WHERE id IN (SELECT id FROM temp.retiring_record_ids);
+            DROP TABLE temp.retiring_record_ids;
             """;
-        strings.Parameters.AddWithValue("$id", pluginId);
-        strings.ExecuteNonQuery();
-
-        using var records = connection.CreateCommand();
-        records.Transaction = transaction;
-        records.CommandText = "DELETE FROM records WHERE plugin_id = $id;";
-        records.Parameters.AddWithValue("$id", pluginId);
-        records.ExecuteNonQuery();
+        retire.Parameters.AddWithValue("$id", pluginId);
+        retire.ExecuteNonQuery();
     }
 
     private static void DeletePlugin(SqliteConnection connection, SqliteTransaction transaction, long pluginId)

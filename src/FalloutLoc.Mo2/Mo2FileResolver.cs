@@ -79,45 +79,16 @@ public sealed class Mo2FileResolver(ISourceFileListing sourceFileSystem)
             throw new ArgumentException("Logical Data path must be a relative path without parent traversal.", nameof(logicalDataPath));
         }
 
-        var providers = new List<PhysicalFileProvider>();
-        var gamePath = Path.Combine(gameDataRoot, logical);
-        if (sourceFileSystem.FileExists(gamePath))
+        var providers = SourceReadBatch.Map(ProviderRoots(gameDataRoot, overwriteRoot, profile), sourceFileSystem, root =>
         {
-            providers.Add(Create(logical, gamePath, PhysicalSourceKind.GameData, "Data", -1, null));
-        }
-
-        foreach (var entry in profile.ModEntries.Where(entry =>
-                     entry.Enabled && entry.DirectoryExists && !entry.IsSeparator))
-        {
-            var candidate = Path.Combine(entry.Directory, logical);
-            if (sourceFileSystem.FileExists(candidate))
-            {
-                providers.Add(Create(
-                    logical,
-                    candidate,
-                    PhysicalSourceKind.Mod,
-                    entry.Name,
-                    entry.EffectivePriority,
-                    entry.ProfileLine));
-            }
-        }
-
-        var overwritePath = Path.Combine(overwriteRoot, logical);
-        if (sourceFileSystem.FileExists(overwritePath))
-        {
-            providers.Add(Create(
-                logical,
-                overwritePath,
-                PhysicalSourceKind.Overwrite,
-                "overwrite",
-                long.MaxValue,
-                null));
-        }
+            var path = Path.Combine(root.Directory, logical);
+            return sourceFileSystem.FileExists(path) ? Create(logical, path, root.Kind, root.Name, root.Priority, root.Line) : null;
+        });
 
         return new PhysicalFileResolution
         {
             LogicalPath = logical,
-            Providers = providers
+            Providers = providers.OfType<PhysicalFileProvider>()
                 .OrderByDescending(provider => provider.EffectivePriority)
                 .ThenBy(provider => provider.SourceName, StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
@@ -139,14 +110,13 @@ public sealed class Mo2FileResolver(ISourceFileListing sourceFileSystem)
         var normalizedExtension = extension.StartsWith('.') ? extension : "." + extension;
         var providers = new Dictionary<string, List<PhysicalFileProvider>>(StringComparer.OrdinalIgnoreCase);
 
-        AddRoot(gameDataRoot, PhysicalSourceKind.GameData, "Data", -1, null);
-        foreach (var entry in profile.ModEntries.Where(entry =>
-                     entry.Enabled && entry.DirectoryExists && !entry.IsSeparator))
+        var batches = SourceReadBatch.Map(ProviderRoots(gameDataRoot, overwriteRoot, profile), sourceFileSystem, ReadRoot);
+        foreach (var file in batches.SelectMany(batch => batch))
         {
-            AddRoot(entry.Directory, PhysicalSourceKind.Mod, entry.Name, entry.EffectivePriority, entry.ProfileLine);
+            if (!providers.TryGetValue(file.LogicalPath, out var candidates))
+                providers.Add(file.LogicalPath, candidates = []);
+            candidates.Add(file);
         }
-
-        AddRoot(overwriteRoot, PhysicalSourceKind.Overwrite, "overwrite", long.MaxValue, null);
         return providers.ToDictionary(
             item => item.Key,
             item => new PhysicalFileResolution
@@ -159,19 +129,15 @@ public sealed class Mo2FileResolver(ISourceFileListing sourceFileSystem)
             },
             StringComparer.OrdinalIgnoreCase);
 
-        void AddRoot(
-            string dataRoot,
-            PhysicalSourceKind kind,
-            string sourceName,
-            long effectivePriority,
-            int? profileLine)
+        IReadOnlyList<PhysicalFileProvider> ReadRoot(ProviderRoot root)
         {
-            var physicalDirectory = Path.Combine(dataRoot, logicalDirectory);
+            var physicalDirectory = Path.Combine(root.Directory, logicalDirectory);
             if (!sourceFileSystem.DirectoryExists(physicalDirectory))
             {
-                return;
+                return [];
             }
 
+            var found = new List<PhysicalFileProvider>();
             var pending = new Stack<string>();
             pending.Push(physicalDirectory);
             while (pending.Count > 0)
@@ -199,17 +165,22 @@ public sealed class Mo2FileResolver(ISourceFileListing sourceFileSystem)
                         continue;
                     }
 
-                    if (!providers.TryGetValue(logicalPath, out var candidates))
-                    {
-                        candidates = [];
-                        providers.Add(logicalPath, candidates);
-                    }
-
-                    candidates.Add(Create(
-                        logicalPath, file, kind, sourceName, effectivePriority, profileLine));
+                    found.Add(Create(logicalPath, file, root.Kind, root.Name, root.Priority, root.Line));
                 }
             }
+            return found;
         }
+    }
+
+    private readonly record struct ProviderRoot(string Directory, PhysicalSourceKind Kind, string Name, long Priority, int? Line);
+
+    private static List<ProviderRoot> ProviderRoots(string data, string overwrite, Mo2ProfileSnapshot profile)
+    {
+        var roots = new List<ProviderRoot> { new(data, PhysicalSourceKind.GameData, "Data", -1, null) };
+        foreach (var entry in profile.ModEntries.Where(entry => entry.Enabled && entry.DirectoryExists && !entry.IsSeparator))
+            roots.Add(new(entry.Directory, PhysicalSourceKind.Mod, entry.Name, entry.EffectivePriority, entry.ProfileLine));
+        roots.Add(new(overwrite, PhysicalSourceKind.Overwrite, "overwrite", long.MaxValue, null));
+        return roots;
     }
 
     private static string NormalizeLogicalPath(string logicalDataPath, string parameterName)

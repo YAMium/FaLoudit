@@ -12,6 +12,10 @@ The last 20 completed builds are recorded in `.falloutloc/logs/index-history.jso
 
 ## When a full rebuild happens
 
+Upgrading from 0.4.5 to 0.4.6 changes SQLite schema 7 to 8. Keep the existing
+workspace and configuration and run `faloudit index --json` once. Do not
+delete the old database: it remains in place until the replacement is ready.
+
 A normal index run must rebuild the database when:
 
 - the SQLite index schema changed;

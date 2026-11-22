@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Enumeration;
 
 namespace FalloutLoc.Core.IO;
@@ -12,7 +13,7 @@ public sealed class IndexFileListing : ISourceFileListing
     private readonly Dictionary<string, Listing> _directories = new(StringComparer.Ordinal);
     private sealed record Listing(string[] Directories, string[] Files, bool AllFiles);
     private readonly Dictionary<string, SourceFileStamp> _stamps = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _missingDirectories = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _missingDirectories = new(StringComparer.Ordinal);
 
     public IndexFileListing(SourceFileSystem source, IEnumerable<string> roots, IEnumerable<string> activePlugins)
     {
@@ -21,13 +22,7 @@ public sealed class IndexFileListing : ISourceFileListing
         // Parallelize independent mod roots only. Merge on one thread; scheduling cannot
         // affect the resolver's original profile order, filename spelling or tie breaks.
         var uniqueRoots = roots.Select(PathRules.NormalizeAbsolute).Distinct(StringComparer.Ordinal).ToArray();
-        var trees = new (Dictionary<string, Listing> Dirs, Dictionary<string, SourceFileStamp> Stamps)[uniqueRoots.Length];
-        Parallel.ForAsync(0, trees.Length, new ParallelOptions { MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount) },
-            (i, _) =>
-            {
-                trees[i] = ScanRoot(uniqueRoots[i]);
-                return ValueTask.CompletedTask;
-            }).GetAwaiter().GetResult(); // Propagate the original guarded I/O exception to the CLI.
+        var trees = SourceReadBatch.Map(uniqueRoots, source, ScanRoot);
         foreach (var tree in trees)
         {
             foreach (var pair in tree.Dirs) _directories.TryAdd(pair.Key, pair.Value);
@@ -108,7 +103,7 @@ public sealed class IndexFileListing : ISourceFileListing
     {
         for (var current = path; Path.GetDirectoryName(current) is { } parent; current = parent)
         {
-            if (_missingDirectories.Contains(parent)) return true;
+            if (_missingDirectories.ContainsKey(parent)) return true;
             if (_directories.ContainsKey(parent)) return current != path && !ProbeDirectory(current);
         }
         return false;
@@ -116,9 +111,9 @@ public sealed class IndexFileListing : ISourceFileListing
 
     private bool ProbeDirectory(string path)
     {
-        if (_missingDirectories.Contains(path)) return false;
+        if (_missingDirectories.ContainsKey(path)) return false;
         if (_source.DirectoryExists(path)) return true;
-        _missingDirectories.Add(path);
+        _missingDirectories.TryAdd(path, 0);
         return false;
     }
 }
