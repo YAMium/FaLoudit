@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.5 — 2026-11-22
+
+- Reuse one in-memory directory inventory per freshness check across plugin,
+  loose-content and Stewie Tweaks provider resolution. Scan independent roots
+  with bounded concurrency and reuse enumeration metadata for regular files.
+- Preserve existing schema-7 indexes, fingerprints, provider ordering and the
+  SQLite integrity check. No time-based or persistent freshness shortcut.
+- Avoid a redundant status check before `analyze` in the Codex project guide.
+- Speed up the two highest-volume SQLite inserts (plugin records and their
+  localized strings) using bound positional statements on the existing
+  per-plugin transaction. Foreign keys, rollback, atomic publication and the
+  complete set of search indexes are unchanged.
+
 ## 0.4.4 — 2026-11-05
 
 - Recovered saved SCPT source omitted by Mutagen's typed reader when SCTX uses

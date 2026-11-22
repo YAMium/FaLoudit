@@ -51,19 +51,15 @@ public static class PathRules
                      StringSplitOptions.RemoveEmptyEntries))
         {
             var next = Path.Combine(current, component);
-            FileSystemInfo? info = null;
-            if (Directory.Exists(next))
+            // FileSystemInfo.Attributes also works for directories and returns -1
+            // for missing entries. One attribute lookup per component, including
+            // ancestors; never cache a link decision between filesystem operations.
+            var info = new FileInfo(next);
+            var attributes = info.Attributes;
+            if (attributes != (FileAttributes)(-1) && (attributes & FileAttributes.ReparsePoint) != 0)
             {
-                info = new DirectoryInfo(next);
-            }
-            else if (File.Exists(next))
-            {
-                info = new FileInfo(next);
-            }
-
-            if (info is not null && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                var target = info.ResolveLinkTarget(returnFinalTarget: true)
+                FileSystemInfo link = (attributes & FileAttributes.Directory) != 0 ? new DirectoryInfo(next) : info;
+                var target = link.ResolveLinkTarget(returnFinalTarget: true)
                     ?? throw new SafetyViolationException($"Cannot resolve reparse point: {next}");
                 current = target.FullName;
             }

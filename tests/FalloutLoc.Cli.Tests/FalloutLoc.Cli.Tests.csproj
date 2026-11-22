@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/FalloutLoc.Cli/FalloutLoc.Cli.csproj" />
+    <Compile Include="../FalloutLoc.Mo2.Tests/Mo2Fixture.cs" Link="Fixtures/Mo2Fixture.cs" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

@@ -182,6 +182,69 @@ public sealed class InstallationDiscoveryTests
         Assert.Equal(3, russian.EffectivePriority);
     }
 
+    [Fact]
+    public void InventoryAndLiveResolverReturnIdenticalPathsStampsAndProviderOrder()
+    {
+        using var f = new Mo2Fixture(addOverwriteConflict: true);
+        var fs = CreateSourceFileSystem(f);
+        var profile = new Mo2ProfileReader(fs).Read(f.ModsRoot, f.ProfileRoot);
+        var roots = profile.ModEntries.Where(m => m.Enabled && m.DirectoryExists && !m.IsSeparator)
+            .Select(m => m.Directory).Append(f.DataRoot).Append(f.OverwriteRoot).ToArray();
+        foreach (var root in roots)
+        {
+            foreach (var rel in new[] { "nvse/Plugins/Scripts/deep/s.txt", "NVSE/Plugins/Scripts/s.gek",
+                         "Textures/Deep/a.ini", "menus/Extra.XML", "Hidden.mohidden/ignored.ini", "meta.ini" })
+            {
+                var file = Path.Combine(root, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, root);
+            }
+        }
+        var inventory = new IndexFileListing(fs, roots, profile.ActivePlugins);
+        var cached = new Mo2FileResolver(inventory);
+        var live = new Mo2FileResolver(fs);
+        void Compare(IReadOnlyDictionary<string, PhysicalFileResolution> expected,
+            IReadOnlyDictionary<string, PhysicalFileResolution> actual)
+        {
+            Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), actual.Keys.Order(StringComparer.Ordinal));
+            foreach (var pair in expected)
+            {
+                var match = actual[pair.Key];
+                Assert.Equal(pair.Value.LogicalPath, match.LogicalPath);
+                Assert.Equal(pair.Value.Providers.ToArray(), match.Providers.ToArray());
+                foreach (var p in match.Providers) Assert.Equal(fs.ReadStamp(p.PhysicalPath), inventory.ReadStamp(p.PhysicalPath));
+            }
+        }
+        Compare(live.ResolvePluginMap(profile.ActivePlugins, f.DataRoot, f.OverwriteRoot, profile),
+            cached.ResolvePluginMap(profile.ActivePlugins, f.DataRoot, f.OverwriteRoot, profile));
+        foreach (var (dir, ext) in new[] { (".", ".ini"), ("Menus", ".xml"), ("NVSE/Plugins/Scripts", ".txt"),
+                     ("NVSE/Plugins/Scripts", ".gek"), ("NVSE/CompileScript", ".gek") })
+        {
+            Compare(live.ResolveDirectoryFiles(dir, ext, f.DataRoot, f.OverwriteRoot, profile),
+                cached.ResolveDirectoryFiles(dir, ext, f.DataRoot, f.OverwriteRoot, profile));
+        }
+    }
+
+    [Fact]
+    public void InventoryDoesNotFollowEscapingDirectoryOrFileLinksWhenSupported()
+    {
+        using var f = new Mo2Fixture();
+        var outside = Path.Combine(f.Workspace, "external.ini");
+        File.WriteAllText(outside, "external");
+        var file = Path.Combine(f.DataRoot, "link.ini");
+        var dir = Path.Combine(f.DataRoot, "alias");
+        try
+        {
+            Directory.CreateSymbolicLink(dir, f.Workspace);
+            File.CreateSymbolicLink(file, outside);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or PlatformNotSupportedException) { return; }
+        var listing = new IndexFileListing(CreateSourceFileSystem(f), [f.DataRoot], []);
+        Assert.Throws<SafetyViolationException>(() => listing.EnumerateFiles(dir).ToArray());
+        Assert.Throws<SafetyViolationException>(() => listing.ReadStamp(file));
+        Assert.Throws<SafetyViolationException>(() => listing.FileExists(Path.Combine(dir, "external.ini")));
+    }
+
     private static SourceFileSystem CreateSourceFileSystem(Mo2Fixture fixture)
     {
         var guard = new ReadOnlySourceGuard([fixture.Source], fixture.Workspace);

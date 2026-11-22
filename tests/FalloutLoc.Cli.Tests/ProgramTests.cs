@@ -13,7 +13,7 @@ public sealed class ProgramTests
         var result = Invoke("--version");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Equal("0.4.4", result.Output.Trim());
+        Assert.Equal("0.4.5", result.Output.Trim());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class ProgramTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("0.4.4", root.GetProperty("applicationVersion").GetString());
+        Assert.Equal("0.4.5", root.GetProperty("applicationVersion").GetString());
         Assert.Equal("find", root.GetProperty("command").GetString());
         Assert.True(root.GetProperty("success").GetBoolean());
         Assert.Equal(0, root.GetProperty("exitCode").GetInt32());
@@ -92,6 +92,61 @@ public sealed class ProgramTests
         Assert.Equal("invalidArguments",
             document.RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Contains("--source-language", document.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void FreshnessDetectsChangesBetweenCommandsWithoutLosingProviderOrIniEvidence()
+    {
+        using var f = new Mo2.Tests.Mo2Fixture(addOverwriteConflict: true);
+        // Empty synthetic TES4 master with just HEDR; no game assets.
+        var header = Convert.FromHexString("544553341200000001000000000000000000000000000000484544520C00B81EAB3F0000000000080000");
+        foreach (var path in Directory.GetFiles(f.Source, "*.esm", SearchOption.AllDirectories))
+            File.WriteAllBytes(path, header);
+        var ini = Path.Combine(f.ModsRoot, "Base Mod", "NVSE", "Plugins", "nvse_stewie_tweaks.ini");
+        Directory.CreateDirectory(Path.GetDirectoryName(ini)!);
+        File.WriteAllText(ini, "[GameSettings]\nsOpen=First");
+
+        Assert.Equal(0, Invoke("configure", f.Source, "--source-language", "en", "--target-language", "ru",
+            "--workspace", f.Workspace, "--json").ExitCode);
+        var built = Invoke("index", "--workspace", f.Workspace, "--json");
+        Assert.True(built.ExitCode == 0, built.Output);
+
+        void Check(bool fresh)
+        {
+            var result = Invoke("analyze", "First", "--workspace", f.Workspace, "--json");
+            using var doc = JsonDocument.Parse(result.Output);
+            Assert.Equal(fresh ? "fresh" : "stale", doc.RootElement.GetProperty("indexState").GetProperty("freshness").GetString());
+            Assert.Equal(fresh ? 0 : 2, result.ExitCode);
+        }
+
+        File.WriteAllText(Path.Combine(f.ModsRoot, "Disabled Mod", "ignored.ini"), "disabled");
+        Check(true);
+        // Same size and timestamp: Stewie settings must still be read and decoded.
+        var time = File.GetLastWriteTimeUtc(ini);
+        File.WriteAllText(ini, "[GameSettings]\nsOpen=Other");
+        File.SetLastWriteTimeUtc(ini, time);
+        Check(false);
+        File.WriteAllText(ini, "[GameSettings]\nsOpen=First");
+        File.SetLastWriteTimeUtc(ini, time);
+        Check(true);
+
+        // A new directory below an asset tree can contain a runtime INI.
+        var nested = Path.Combine(f.ModsRoot, "Base Mod", "textures", "new", "settings.ini");
+        Directory.CreateDirectory(Path.GetDirectoryName(nested)!);
+        File.WriteAllText(nested, "key=value");
+        Check(false);
+        File.Delete(nested);
+        Check(true);
+        // An edit to a losing provider matters, not only an edit to the winner.
+        var loser = Path.Combine(f.ModsRoot, "Base Mod", "Menus", "sample.xml");
+        var renamed = Path.ChangeExtension(loser, ".bak");
+        File.Move(loser, renamed);
+        Check(false);
+        File.Move(renamed, loser);
+        Check(true);
+        var modlist = Path.Combine(f.ProfileRoot, "modlist.txt");
+        File.WriteAllText(modlist, "+Base Mod\n+Russian Mod\n-Disabled Mod\n+Visual_separator\n");
+        Check(false);
     }
 
     private static (int ExitCode, string Output) Invoke(params string[] args)

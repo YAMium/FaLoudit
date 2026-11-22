@@ -4,6 +4,14 @@ namespace FalloutLoc.Core.IO;
 
 public sealed class SourceFileSystem(ReadOnlySourceGuard guard) : ISourceFileSystem
 {
+    internal DirectoryInfo ReadDirectory(string path) => new(guard.EnsureReadableSource(path));
+
+    public SourceFileStamp ReadStamp(string path)
+    {
+        var info = new FileInfo(guard.EnsureReadableSource(path));
+        return new SourceFileStamp(info.Length, info.LastWriteTimeUtc);
+    }
+
     public bool FileExists(string path) => File.Exists(guard.EnsureReadableSource(path));
 
     public bool DirectoryExists(string path) => Directory.Exists(guard.EnsureReadableSource(path));

@@ -3,7 +3,7 @@ using FalloutLoc.Mo2.Models;
 
 namespace FalloutLoc.Mo2;
 
-public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
+public sealed class Mo2FileResolver(ISourceFileListing sourceFileSystem)
 {
     public IReadOnlyDictionary<string, PhysicalFileResolution> ResolvePluginMap(
         IReadOnlyList<string> activePlugins,
@@ -184,10 +184,7 @@ public sealed class Mo2FileResolver(ISourceFileSystem sourceFileSystem)
                     pending.Push(child);
                 }
 
-                foreach (var file in sourceFileSystem.EnumerateFiles(directory)
-                             .Where(file => Path.GetExtension(file).Equals(
-                                 normalizedExtension,
-                                 StringComparison.OrdinalIgnoreCase)))
+                foreach (var file in sourceFileSystem.EnumerateFiles(directory, normalizedExtension))
                 {
                     var relative = Path.GetRelativePath(physicalDirectory, file);
                     var logicalPath = logicalDirectory.Length == 0

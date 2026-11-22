@@ -120,7 +120,7 @@ Treat a quoted string, an unquoted visible phrase, or a screenshot transcription
 
 ### 1. Check freshness
 
-Before the first investigation of a session, or when the user says the profile/build changed, run `index --status --json`. If stale, run normal `index --json` before searching. Do not rebuild before every string when the environment has not changed.
+After bootstrap, start each investigation with `analyze` itself: it verifies freshness on every invocation. Do not prefix it with a second `index --status`. If it reports `indexNotFresh`, inspect the reason; for a missing or stale index run normal `index --json`, then retry. Use `index --status` separately for an explicit health/integrity check, or before relying on a lower-level command that does not verify freshness.
 
 ### 2. Search
 

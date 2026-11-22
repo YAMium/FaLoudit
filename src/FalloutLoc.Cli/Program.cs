@@ -283,7 +283,7 @@ public static class Program
                 AddCheck(checks, "mutagen-cp1251-smoke", false, exception.Message);
             }
 
-            var gameSettings = LoadGameSettingInputs(configuration, result, guard, sourceFileSystem);
+            var gameSettings = LoadGameSettingInputs(configuration, result, guard, sourceFileSystem, resolver);
             gameSettingWarnings = gameSettings.Warnings;
             AddCheck(
                 checks,
@@ -296,7 +296,7 @@ public static class Program
 
             try
             {
-                var looseContent = DiscoverLooseContentFiles(result, guard, sourceFileSystem);
+                var looseContent = DiscoverLooseContentFiles(result, resolver, sourceFileSystem.ReadStamp);
                 AddCheck(
                     checks,
                     "loose-content",
@@ -1457,7 +1457,11 @@ public static class Program
             throw new InvalidOperationException("plugins.txt and loadorder.txt differ; refusing to use an ambiguous load order.");
         }
 
-        var resolutions = new Mo2FileResolver(sourceFileSystem).ResolvePluginMap(
+        var roots = discovery.Profile.ModEntries.Where(entry => entry.Enabled && entry.DirectoryExists && !entry.IsSeparator)
+            .Select(entry => entry.Directory).Prepend(discovery.DataRoot).Append(discovery.OverwriteRoot);
+        var listing = new IndexFileListing(sourceFileSystem, roots, discovery.Profile.ActivePlugins);
+        var resolver = new Mo2FileResolver(listing);
+        var resolutions = resolver.ResolvePluginMap(
             discovery.Profile.ActivePlugins, discovery.DataRoot, discovery.OverwriteRoot, discovery.Profile);
         var plugins = new List<IndexPluginInput>();
         var providers = new List<IndexPhysicalProviderInput>();
@@ -1471,7 +1475,7 @@ public static class Program
 
             foreach (var provider in resolution.Providers)
             {
-                var file = new FileInfo(guard.EnsureReadableSource(provider.PhysicalPath));
+                var file = listing.ReadStamp(provider.PhysicalPath);
                 providers.Add(new IndexPhysicalProviderInput
                 {
                     LogicalPath = resolution.LogicalPath,
@@ -1487,7 +1491,9 @@ public static class Program
             }
 
             var winner = resolution.Winner;
-            var winnerFile = new FileInfo(guard.EnsureReadableSource(winner.PhysicalPath));
+            // The selected plugin is also an input to the backend, not just metadata.
+            // Revalidate its physical path independently of the directory inventory.
+            var winnerFile = sourceFileSystem.ReadStamp(winner.PhysicalPath);
             plugins.Add(new IndexPluginInput
             {
                 LoadOrderIndex = item.order,
@@ -1504,11 +1510,10 @@ public static class Program
             configuration,
             discovery,
             guard,
-            sourceFileSystem);
+            sourceFileSystem, resolver);
         var looseContent = DiscoverLooseContentFiles(
             discovery,
-            guard,
-            sourceFileSystem);
+            resolver, listing.ReadStamp);
         providers.AddRange(looseContent.Providers);
 
         return new CurrentIndexInputs(
@@ -1536,10 +1541,9 @@ public static class Program
 
     private static LooseContentDiscovery DiscoverLooseContentFiles(
         InstallationDiscoveryResult discovery,
-        ReadOnlySourceGuard guard,
-        SourceFileSystem sourceFileSystem)
+        Mo2FileResolver resolver,
+        Func<string, SourceFileStamp> readStamp)
     {
-        var resolver = new Mo2FileResolver(sourceFileSystem);
         var resolutions = new Dictionary<string, (PhysicalFileResolution Resolution, RecordContentSourceKind Kind)>(
             StringComparer.OrdinalIgnoreCase);
 
@@ -1584,8 +1588,7 @@ public static class Program
 
             foreach (var provider in item.Resolution.Providers)
             {
-                var readable = guard.EnsureReadableSource(provider.PhysicalPath);
-                var info = new FileInfo(readable);
+                var info = readStamp(provider.PhysicalPath);
                 providers.Add(new IndexPhysicalProviderInput
                 {
                     LogicalPath = item.Resolution.LogicalPath,
@@ -1600,7 +1603,7 @@ public static class Program
                 });
             }
 
-            var winnerInfo = new FileInfo(guard.EnsureReadableSource(winner.PhysicalPath));
+            var winnerInfo = readStamp(winner.PhysicalPath);
             files.Add(new IndexLooseContentFileInput
             {
                 LogicalPath = item.Resolution.LogicalPath,
@@ -1677,7 +1680,8 @@ public static class Program
         ProjectConfiguration configuration,
         InstallationDiscoveryResult discovery,
         ReadOnlySourceGuard guard,
-        SourceFileSystem sourceFileSystem)
+        SourceFileSystem sourceFileSystem,
+        Mo2FileResolver resolver)
     {
         var pair = configuration.RequireLanguagePair();
         var decoder = new StrictPluginStringDecoder(pair.Source, pair.Target);
@@ -1736,7 +1740,7 @@ public static class Program
             }
         }
 
-        var postPlugin = LoadPostPluginGameSettings(discovery, sourceFileSystem, decoder, warnings);
+        var postPlugin = LoadPostPluginGameSettings(discovery, sourceFileSystem, resolver, decoder, warnings);
         return new GameSettingInputs(
             engineSettings,
             postPlugin,
@@ -1749,10 +1753,10 @@ public static class Program
     private static IReadOnlyList<IndexPostPluginGameSettingInput> LoadPostPluginGameSettings(
         InstallationDiscoveryResult discovery,
         SourceFileSystem sourceFileSystem,
+        Mo2FileResolver resolver,
         StrictPluginStringDecoder decoder,
         List<string> warnings)
     {
-        var resolver = new Mo2FileResolver(sourceFileSystem);
         var files = new List<(PhysicalFileResolution Resolution, bool ExtraDirectory)>();
         var main = resolver.Resolve(
             Path.Combine("NVSE", "Plugins", "nvse_stewie_tweaks.ini"),

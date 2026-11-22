@@ -26,6 +26,66 @@ public sealed class SqliteIndexTests
     }
 
     [Fact]
+    public void ReboundColumnsPreserveNullEmptyAndEmbeddedNulAndAttachToTheRightRecord()
+    {
+        using var area = new TestArea();
+        const string text = "Сон\0é🌙";
+        var first = Record("000123:Base.esm", "First", text);
+        var field = Assert.Single(first.Strings);
+        var second = first with
+        {
+            FormKey = "000125:Base.esm",
+            EditorId = null,
+            Strings = [field with { Text = null }, field with { Text = "" }],
+        };
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] = [first, EmptyRecord("000124:Base.esm", "Unused", RecordParseStatus.NotApplicable), second],
+        };
+        var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm"));
+        Assert.Equal(0, result.FailedPlugins);
+        using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = area.Database, Pooling = false }.ToString());
+        db.Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT r.form_key, r.editor_id, typeof(s.text), hex(s.text)
+            FROM strings s JOIN records r ON r.id = s.record_id ORDER BY s.id
+            """;
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(("000123:Base.esm", "First", "text", Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(text))),
+            (reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        foreach (var storageClass in new[] { "null", "text" })
+        {
+            Assert.True(reader.Read());
+            Assert.Equal("000125:Base.esm", reader.GetString(0));
+            Assert.True(reader.IsDBNull(1));
+            Assert.Equal(storageClass, reader.GetString(2));
+            Assert.Equal("", reader.GetString(3));
+        }
+        Assert.False(reader.Read());
+    }
+
+    [Fact]
+    public void ConstraintFailureRollsBackAllRowsOfOnePluginAndDoesNotStopTheNextPlugin()
+    {
+        using var area = new TestArea();
+        var invalid = Record("000124:Base.esm", "Invalid", "invalid");
+        var records = new Dictionary<string, IReadOnlyList<RecordOccurrence>>
+        {
+            ["base.esm"] = [Record("000123:Base.esm", "First", "rolled back"),
+                invalid with { Strings = [Assert.Single(invalid.Strings) with { SemanticPath = null! }] }],
+            ["patch.esp"] = [Record("000126:Patch.esp", "Next", "survives")],
+        };
+        var result = CreateBuilder(area, new FakeBackend(records)).Build(Request(area, "base.esm", "patch.esp"));
+        Assert.Equal(1, result.ParsedPlugins);
+        Assert.Equal(1, result.FailedPlugins);
+        var repository = new SqliteIndexRepository(area.Database);
+        Assert.Empty(repository.Find("rolled back"));
+        Assert.Single(repository.Find("survives"));
+    }
+
+    [Fact]
     public void BuildsSearchableIndexAndResolvesWinningOverride()
     {
         using var area = new TestArea();

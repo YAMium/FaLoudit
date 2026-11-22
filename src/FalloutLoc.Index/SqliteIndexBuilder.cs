@@ -813,8 +813,18 @@ public sealed class SqliteIndexBuilder(
             SourceMod = plugin.SourceMod,
         });
         using var transaction = connection.BeginTransaction();
-        using var insertRecord = CreateRecordCommand(connection, transaction);
-        using var insertString = CreateStringCommand(connection, transaction);
+        using var insertRecord = new RowInsert(transaction, """
+            INSERT INTO records(snapshot_id, plugin_id, form_key, origin_plugin, record_type, editor_id,
+                is_deleted, is_compressed, parse_status, parse_warnings)
+            VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);
+            """);
+        insertRecord.Bind(1, snapshotId);
+        insertRecord.Bind(2, pluginId);
+        using var insertString = new RowInsert(transaction, """
+            INSERT INTO strings(record_id, semantic_path, category, text, normalized_text, language,
+                encoding_evidence, bytes_sha256, ambiguous)
+            VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9);
+            """);
         using var insertContent = CreateContentCommand(connection, transaction);
         var encodingFields = new List<RecordStringOccurrence>();
         long recordCount = 0;
@@ -825,8 +835,18 @@ public sealed class SqliteIndexBuilder(
         foreach (var record in session.EnumerateMajorRecords(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            SetRecordParameters(insertRecord, snapshotId, pluginId, record);
-            var recordId = (long)insertRecord.ExecuteScalar()!;
+            insertRecord.Bind(3, record.FormKey);
+            insertRecord.Bind(4, record.OriginPlugin);
+            insertRecord.Bind(5, record.RecordType);
+            insertRecord.Bind(6, record.EditorId);
+            insertRecord.Bind(7, record.IsDeleted ? 1 : 0);
+            insertRecord.Bind(8, record.IsCompressed ? 1 : 0);
+            insertRecord.Bind(9, RecordParseStatusValue(record.ParseStatus));
+            insertRecord.Bind(10, record.ParseWarnings.Count == 0 ? null : JsonSerializer.Serialize(
+                record.ParseWarnings.Take(20).Select(warning => warning[..Math.Min(warning.Length, 1000)])));
+            insertRecord.Execute();
+            var recordId = record.Strings.Count != 0 || record.Contents.Count != 0
+                ? SQLitePCL.raw.sqlite3_last_insert_rowid(connection.Handle) : 0;
             recordCount++;
             if (record.ParseStatus is RecordParseStatus.PartiallyParsed or RecordParseStatus.Unverified)
             {
@@ -835,8 +855,16 @@ public sealed class SqliteIndexBuilder(
 
             foreach (var field in record.Strings)
             {
-                SetStringParameters(insertString, recordId, field);
-                insertString.ExecuteNonQuery();
+                insertString.Bind(1, recordId);
+                insertString.Bind(2, field.SemanticPath);
+                insertString.Bind(3, field.Category);
+                insertString.Bind(4, field.Text);
+                insertString.Bind(5, TextNormalizer.Normalize(field.Text));
+                insertString.Bind(6, field.Language.ToString());
+                insertString.Bind(7, field.EncodingEvidence.ToString());
+                insertString.Bind(8, field.RecoveredBytesSha256);
+                insertString.Bind(9, field.Ambiguous ? 1 : 0);
+                insertString.Execute();
                 encodingFields.Add(field);
                 stringCount++;
             }
@@ -870,54 +898,6 @@ public sealed class SqliteIndexBuilder(
         return new IndexPluginCounts(recordCount, stringCount, contentCount, coverageGapRecords);
     }
 
-    private static SqliteCommand CreateRecordCommand(SqliteConnection connection, SqliteTransaction transaction)
-    {
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO records(
-                snapshot_id, plugin_id, form_key, origin_plugin, record_type, editor_id, is_deleted, is_compressed,
-                parse_status, parse_warnings)
-            VALUES ($snapshot, $plugin, $form, $origin, $type, $editor, $deleted, $compressed, $status, $warnings);
-            SELECT last_insert_rowid();
-            """;
-        command.Parameters.Add("$snapshot", SqliteType.Integer);
-        command.Parameters.Add("$plugin", SqliteType.Integer);
-        command.Parameters.Add("$form", SqliteType.Text);
-        command.Parameters.Add("$origin", SqliteType.Text);
-        command.Parameters.Add("$type", SqliteType.Text);
-        command.Parameters.Add("$editor", SqliteType.Text);
-        command.Parameters.Add("$deleted", SqliteType.Integer);
-        command.Parameters.Add("$compressed", SqliteType.Integer);
-        command.Parameters.Add("$status", SqliteType.Text);
-        command.Parameters.Add("$warnings", SqliteType.Text);
-        command.Prepare();
-        return command;
-    }
-
-    private static SqliteCommand CreateStringCommand(SqliteConnection connection, SqliteTransaction transaction)
-    {
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO strings(
-                record_id, semantic_path, category, text, normalized_text, language,
-                encoding_evidence, bytes_sha256, ambiguous)
-            VALUES ($record, $semantic, $category, $text, $normalized, $language, $encoding, $sha, $ambiguous);
-            """;
-        command.Parameters.Add("$record", SqliteType.Integer);
-        command.Parameters.Add("$semantic", SqliteType.Text);
-        command.Parameters.Add("$category", SqliteType.Text);
-        command.Parameters.Add("$text", SqliteType.Text);
-        command.Parameters.Add("$normalized", SqliteType.Text);
-        command.Parameters.Add("$language", SqliteType.Text);
-        command.Parameters.Add("$encoding", SqliteType.Text);
-        command.Parameters.Add("$sha", SqliteType.Text);
-        command.Parameters.Add("$ambiguous", SqliteType.Integer);
-        command.Prepare();
-        return command;
-    }
-
     private static SqliteCommand CreateContentCommand(SqliteConnection connection, SqliteTransaction transaction)
     {
         var command = connection.CreateCommand();
@@ -939,42 +919,6 @@ public sealed class SqliteIndexBuilder(
         command.Parameters.Add("$heuristic", SqliteType.Integer);
         command.Prepare();
         return command;
-    }
-    private static void SetRecordParameters(
-        SqliteCommand command,
-        long snapshotId,
-        long pluginId,
-        RecordOccurrence record)
-    {
-        command.Parameters["$snapshot"].Value = snapshotId;
-        command.Parameters["$plugin"].Value = pluginId;
-        command.Parameters["$form"].Value = record.FormKey;
-        command.Parameters["$origin"].Value = record.OriginPlugin;
-        command.Parameters["$type"].Value = record.RecordType;
-        command.Parameters["$editor"].Value = record.EditorId is null ? DBNull.Value : record.EditorId;
-        command.Parameters["$deleted"].Value = record.IsDeleted ? 1 : 0;
-        command.Parameters["$compressed"].Value = record.IsCompressed ? 1 : 0;
-        command.Parameters["$status"].Value = RecordParseStatusValue(record.ParseStatus);
-        command.Parameters["$warnings"].Value = record.ParseWarnings.Count == 0
-            ? DBNull.Value
-            : JsonSerializer.Serialize(record.ParseWarnings
-                .Take(20)
-                .Select(warning => warning[..Math.Min(warning.Length, 1000)]));
-    }
-
-    private static void SetStringParameters(SqliteCommand command, long recordId, RecordStringOccurrence field)
-    {
-        command.Parameters["$record"].Value = recordId;
-        command.Parameters["$semantic"].Value = field.SemanticPath;
-        command.Parameters["$category"].Value = field.Category;
-        command.Parameters["$text"].Value = field.Text is null ? DBNull.Value : field.Text;
-        command.Parameters["$normalized"].Value = TextNormalizer.Normalize(field.Text) is { } normalized
-            ? normalized
-            : DBNull.Value;
-        command.Parameters["$language"].Value = field.Language.ToString();
-        command.Parameters["$encoding"].Value = field.EncodingEvidence.ToString();
-        command.Parameters["$sha"].Value = field.RecoveredBytesSha256 is null ? DBNull.Value : field.RecoveredBytesSha256;
-        command.Parameters["$ambiguous"].Value = field.Ambiguous ? 1 : 0;
     }
 
     private static void SetContentParameters(SqliteCommand command, long recordId, RecordContentOccurrence content)
